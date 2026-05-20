@@ -1,0 +1,1757 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Jot</title>
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><circle cx='50' cy='50' r='50' fill='%23FFC800'/></svg>">
+  <link rel="icon" type="image/png" href="https://raw.githubusercontent.com/puppenkistenlukas/Jot/main/iconimage_v7.png">
+  <link rel="apple-touch-icon" href="https://raw.githubusercontent.com/puppenkistenlukas/Jot/main/iconimage_v7.png">
+  <link rel="manifest" href="data:application/manifest+json,{&quot;name&quot;:&quot;Jot&quot;,&quot;icons&quot;:[{&quot;src&quot;:&quot;https://raw.githubusercontent.com/puppenkistenlukas/Jot/main/iconimage_v7.png&quot;,&quot;sizes&quot;:&quot;any&quot;,&quot;type&quot;:&quot;image/png&quot;}],&quot;display&quot;:&quot;standalone&quot;}">
+  <style>
+    ::selection {
+      background: rgba(0, 0, 0, 0.3);
+      color: inherit;
+    }
+    #editor {
+      width: 100%;
+      min-height: 100vh;
+      padding: 2rem;
+      box-sizing: border-box;
+      font-family: 'SF Mono', monospace;
+      caret-color: transparent;
+      outline: none;
+      overflow-wrap: break-word;
+      hyphens: auto;
+      -webkit-hyphens: auto;
+      /* Suppress the iOS Cut/Copy/Paste/AutoFill callout on long-press */
+      -webkit-touch-callout: none;
+    }
+    #block-cursor {
+      position: fixed;
+      width: 1ch;
+      font-family: 'SF Mono', monospace;
+      background: rgba(0, 0, 0, 0.3);
+      pointer-events: none;
+      display: none;
+    }
+    #editor u {
+      text-decoration: none;
+      background: rgba(255, 200, 0, 0.3);
+    }
+    #editor a {
+      color: #FFB500;
+      text-decoration: none;
+      cursor: pointer;
+    }
+    #editor u u {
+      background: transparent;
+    }
+    .list-line {
+      padding-left: calc((var(--level, 0) * 3 + 3) * 1ch);
+    }
+    .list-line::before {
+      content: "\00a0- ";
+      display: inline-block;
+      width: 3ch;
+      margin-left: -3ch;
+    }
+    .list-line[data-bullet="arrow"]::before {
+      content: "\00a0\2192 ";
+    }
+    .list-line[data-bullet="plus"]::before {
+      content: "\00a0+ ";
+    }
+    #jot-welcome {
+      position: fixed;
+      inset: 0;
+      padding: 2rem;
+      box-sizing: border-box;
+      font-family: 'SF Mono', monospace;
+      background: white;
+      overflow-y: auto;
+      z-index: 100;
+      overflow-wrap: break-word;
+    }
+    /* Contain scroll on welcome/confirm so it doesn't bleed to the editor. */
+    #jot-welcome {
+      overscroll-behavior: contain;
+    }
+    .jot-entry { cursor: pointer; }
+    .jot-entry:hover, .jot-entry-selected { background: rgba(0,0,0,0.07); }
+    .jot-new { cursor: pointer; }
+    .jot-new:hover { background: rgba(0,0,0,0.07); }
+    .jot-clear { cursor: pointer; }
+    .jot-clear:hover { background: rgba(0,0,0,0.07); }
+    #jot-welcome u { text-decoration: none; background: rgba(255, 200, 0, 0.3); }
+    @media (max-width: 600px) {
+      #editor, #jot-welcome { padding: 1rem; }
+    }
+    /* Hide the editor and its cursor whenever any welcome/recovery/confirm
+       overlay is present — prevents the document from bleeding through. */
+    body:has(#jot-welcome) #editor,
+    body:has(#jot-welcome) #block-cursor { visibility: hidden; }
+    .jot-img {
+      max-height: 50vh;
+      max-width: 50vw;
+      height: auto;
+      width: auto;
+      display: block;
+    }
+    #jot-toolbar {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      /* No transform on the fixed element itself — transforms on position:fixed
+         elements break fixed positioning in iOS Safari. GPU compositing is
+         achieved via will-change on the inner pill instead. */
+      padding: 8px;
+      box-sizing: border-box;
+      display: none;
+      z-index: 200;
+      pointer-events: none;
+    }
+    #jot-toolbar-inner {
+      background: rgba(0,0,0,0.9);
+      border-radius: 42px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 10px 20px;
+      box-shadow: -2px -2px 10px 0 rgba(0,0,0,0.25), 0px 4px 4px 0px rgba(0,0,0,0.25);
+      pointer-events: auto;
+      user-select: none;
+      -webkit-tap-highlight-color: transparent;
+      /* Center the pill and cap its width; will-change creates a GPU layer. */
+      max-width: 546px;
+      margin: 0 auto;
+      will-change: transform;
+    }
+    #jot-toolbar button {
+      background: none;
+      border: none;
+      color: rgba(255,255,255,0.9);
+      font-family: 'SF Mono', monospace;
+      font-size: 1rem;
+      line-height: 1;
+      padding: 4px 10px;
+      cursor: pointer;
+      -webkit-tap-highlight-color: transparent;
+    }
+    #jot-toolbar button:active { opacity: 0.5; }
+    #jtb-bold   { font-weight: bold; }
+    #jtb-italic { font-style: italic; }
+    #jtb-underline { text-decoration: underline; text-underline-offset: 3px; }
+    /* ⇥ ⇤ are 50% larger but have no vertical padding so the pill height
+       stays the same as the 1rem + 4px/4px buttons alongside them. */
+    #jtb-tab, #jtb-stab {
+      font-size: 1.5rem;
+      padding-top: 0;
+      padding-bottom: 0;
+    }
+    /* toolbar hidden — @media (pointer: coarse) block removed */
+
+    @media (prefers-color-scheme: dark) {
+      body {
+        background: #111;
+        color: #e8e8e8;
+      }
+      #editor {
+        color: #e8e8e8;
+      }
+      #block-cursor {
+        background: rgba(255, 255, 255, 0.5);
+      }
+      ::selection {
+        background: rgba(255, 255, 255, 0.5);
+        color: inherit;
+      }
+      #editor u {
+        background: rgba(255, 200, 0, 0.6);
+      }
+      #jot-welcome {
+        background: #111;
+        color: #e8e8e8;
+      }
+      .jot-entry:hover, .jot-entry-selected { background: rgba(255,255,255,0.08); }
+      .jot-new:hover { background: rgba(255,255,255,0.08); }
+      .jot-clear:hover { background: rgba(255,255,255,0.08); }
+    }
+
+  </style>
+</head>
+<body>
+  <div id="editor" contenteditable="true" spellcheck="false"><div><br></div></div>
+  <div id="block-cursor"></div>
+  <div id="jot-toolbar">
+    <div id="jot-toolbar-inner">
+      <button id="jtb-undo">↺</button>
+      <button id="jtb-redo">↻</button>
+      <button id="jtb-stab">⇤</button>
+      <button id="jtb-tab">⇥</button>
+      <button id="jtb-bold">B</button>
+      <button id="jtb-italic">I</button>
+      <button id="jtb-underline">U</button>
+    </div>
+  </div>
+
+  <!-- Default "Jot Features" document — stored as plain markup so it reads
+       and edits like any other Jot document. jotSeedFeatures() reads
+       this template's innerHTML directly; no JS string escaping needed. -->
+  <template id="jot-features-tpl">
+    <div><b>Jot Features</b></div>
+    <div><i>Jot is a lightweight text editor that lives in a single HTML file. It offers simple formatting, indented lists, continuously backs up your work in localStorage and exports itself into every document you save.</i></div>
+    <div><br></div>
+    <div class="list-line" style="--level: 0;"><u>Save</u> any Jot document as HTML to export a local file. You can continue work on the exported file, but it no longer backs up automatically.</div>
+    <div><br></div>
+    <div class="list-line" style="--level: 0;">You can <b>bold</b> text, <i>italicize</i> or <u>underline</u> to highlight it.<br></div>
+    <div><br></div>
+    <div class="list-line" style="--level: 0;">Select text and paste an URL to create a <a href="https://github.com/puppenkistenlukas/Jot" target="_blank" rel="noopener noreferrer">hyperlink</a>.  </div>
+    <div><br></div>
+    <div class="list-line" style="--level: 0;">Type <u>-</u>, <u>+</u> or <u>&gt;</u> at the very beginning of a line to create a list item or change its bullet style.</div>
+    <div class="list-line" style="--level: 1;" data-bullet="plus">Swipe right or press <u>Tab</u> to increase a list item's indentation level.</div>
+    <div class="list-line" style="--level: 2;" data-bullet="arrow">Like so.</div>
+    <div class="list-line" style="--level: 1;" data-bullet="plus">Swipe left or press <u>Shift+Tab</u> to decrease the indentation level.</div>
+    <div><br></div>
+    <div>Type <u>Backspace</u> or <u>Enter</u> at the very beginning of a list item to turn it into a regular line of text.</div>
+    <div><br></div>
+    <div>Swipe or use <u>Tab</u> in regular (<i>non-list</i>) lines to create simple tables like so:</div>
+    <div><b>Player&nbsp; &nbsp; &nbsp; Score&nbsp; &nbsp; &nbsp; &nbsp;Comment</b></div>
+    <div>Lukas&nbsp; &nbsp; &nbsp; &nbsp;19&nbsp; &nbsp; &nbsp; &nbsp; &nbsp; Hello!</div>
+    <div>Muriel&nbsp; &nbsp; &nbsp; 29&nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &lt;3</div>
+    <div>Bacon&nbsp; &nbsp; &nbsp; &nbsp;07&nbsp; &nbsp; &nbsp; &nbsp; &nbsp; (°œ°)</div>
+    <div><br></div>
+    <div>Every new jot is automatically <b>backed up</b> in your browser's local storage.</div>
+    <div class="list-line" style="--level: 0;"><u>Swipe right from the left edge of the screen</u> or press <u>Escape</u> to access an <b>overview</b>.</div>
+    <div class="list-line" style="--level: 1;" data-bullet="arrow"><i>Completely empty jots disappear from the list.</i></div>
+    <div class="list-line" style="--level: 0;">Use <b>Reset</b> to clear all entries.</div>
+    <div class="list-line" style="--level: 0;">Use <b>Recovery</b> to access snapshots of the ten last jots you re-opened, in case there's an accident.</div>
+    <div><br></div>
+    <div><b><i>Pro tip:</i></b> <i>Try pasting images or web content into your jot 🪄</i></div>
+    <div><br></div>
+    <div><br></div>
+  </template>
+
+  <script>
+    const editor = document.getElementById('editor');
+    const blockCursor = document.getElementById('block-cursor');
+
+    // Tell the browser to use <div> (not <p> or <br>) when its native Enter
+    // handling fires as a fallback. Affects Firefox most visibly but is a
+    // safe no-op on Chrome/Safari which also support the command.
+    try { document.execCommand('defaultParagraphSeparator', false, 'div'); } catch (_) {}
+
+    // Set to true in every keydown Enter branch so the beforeinput handler
+    // knows whether our code already handled the keystroke.
+    // Chrome fires beforeinput even after keydown.preventDefault() (non-spec).
+    // Firefox/Safari only fire it when keydown did NOT prevent default.
+    // In either case, if our keydown handler silently failed (e.g. getLineEl
+    // returned null), the flag is false and we let the browser's native Enter
+    // fire rather than blocking it, so the user always gets a new line.
+    let _jotEnterHandled = false;
+    function getCaretRect() {
+      const sel = window.getSelection();
+      if (!sel || !sel.rangeCount) return null;
+      const range = sel.getRangeAt(0);
+      let rect = range.getBoundingClientRect();
+      if (rect && rect.height > 0) return rect;
+      const marker = document.createElement('span');
+      marker.textContent = '​';
+      const tmp = range.cloneRange();
+      tmp.insertNode(marker);
+      const r = marker.getBoundingClientRect();
+      marker.remove();
+      return r.height > 0 ? { left: r.left, top: r.top, height: r.height } : null;
+    }
+
+    function updateCursor() {
+      if (document.activeElement !== editor) {
+        blockCursor.style.display = 'none';
+        return;
+      }
+      const sel = window.getSelection();
+      if (!sel || !sel.isCollapsed || !sel.rangeCount) {
+        blockCursor.style.display = 'none';
+        return;
+      }
+      const rect = getCaretRect();
+      if (!rect) { blockCursor.style.display = 'none'; return; }
+      // On iOS, position:fixed is relative to the visual viewport, but
+      // getBoundingClientRect() is relative to the layout viewport. When the
+      // keyboard shifts the visual viewport (offsetTop/Left != 0) the two
+      // coordinate systems diverge and the cursor appears offset. Add the
+      // visual viewport offset to re-align them.
+      const vv = window.visualViewport;
+      const vvTop  = vv ? vv.offsetTop  : 0;
+      const vvLeft = vv ? vv.offsetLeft : 0;
+      blockCursor.style.display = 'block';
+      blockCursor.style.left = (rect.left + vvLeft) + 'px';
+      blockCursor.style.top  = (rect.top  + vvTop)  + 'px';
+      blockCursor.style.height = rect.height + 'px';
+    }
+
+    function loop() {
+      updateCursor();
+      requestAnimationFrame(loop);
+    }
+    requestAnimationFrame(loop);
+    editor.focus();
+
+    function getLineEl() {
+      const sel = window.getSelection();
+      if (!sel || !sel.rangeCount) return null;
+      let node = sel.anchorNode;
+      if (!node) return null;
+      if (node.nodeType === Node.TEXT_NODE) node = node.parentElement;
+      if (node === editor) {
+        const idx = Math.min(sel.anchorOffset, editor.children.length - 1);
+        return editor.children[idx] || null;
+      }
+      while (node && node.parentElement !== editor) node = node.parentElement;
+      return (node && node !== editor) ? node : null;
+    }
+
+    function isAtStart(lineEl) {
+      const sel = window.getSelection();
+      if (!sel || !sel.rangeCount || !sel.isCollapsed) return false;
+      const range = sel.getRangeAt(0);
+      try {
+        const testRange = document.createRange();
+        testRange.setStart(lineEl, 0);
+        testRange.setEnd(range.startContainer, range.startOffset);
+        return testRange.toString() === '';
+      } catch { return false; }
+    }
+
+    function getLevel(el) {
+      return parseInt(el.style.getPropertyValue('--level') || '0', 10);
+    }
+
+    function setLevel(el, level) {
+      el.style.setProperty('--level', Math.max(0, level));
+    }
+
+    function plainNodes(node) {
+      if (node.nodeType === Node.TEXT_NODE) return node.cloneNode();
+      if (node.nodeName === 'BR') return node.cloneNode();
+      if (node.nodeName === 'A') {
+        const a = document.createElement('a');
+        a.href = node.getAttribute('href') || '';
+        a.target = '_blank';
+        a.rel = 'noopener noreferrer';
+        for (const child of node.childNodes) a.appendChild(plainNodes(child));
+        return a;
+      }
+      const frag = document.createDocumentFragment();
+      for (const child of node.childNodes) frag.appendChild(plainNodes(child));
+      return frag;
+    }
+
+    function getCursorColumn(lineEl) {
+      const sel = window.getSelection();
+      if (!sel || !sel.rangeCount) return 0;
+      const range = sel.getRangeAt(0);
+      try {
+        const pre = document.createRange();
+        pre.setStart(lineEl, 0);
+        pre.setEnd(range.startContainer, range.startOffset);
+        return pre.toString().length;
+      } catch { return 0; }
+    }
+
+    function setCursorAtColumn(lineEl, targetCol) {
+      let col = Math.max(0, Math.min(targetCol, lineEl.textContent.length));
+      const walker = document.createTreeWalker(lineEl, NodeFilter.SHOW_TEXT);
+      let node;
+      while ((node = walker.nextNode()) !== null) {
+        if (col <= node.textContent.length) {
+          const range = document.createRange();
+          range.setStart(node, col);
+          range.collapse(true);
+          const sel = window.getSelection();
+          sel.removeAllRanges();
+          sel.addRange(range);
+          return;
+        }
+        col -= node.textContent.length;
+      }
+      const range = document.createRange();
+      range.selectNodeContents(lineEl);
+      range.collapse(false);
+      const sel = window.getSelection();
+      sel.removeAllRanges();
+      sel.addRange(range);
+    }
+
+    function jotScrollToCursor() {
+      // Use the line element's rect rather than the collapsed range's rect:
+      // a collapsed range before a <br> in a freshly-inserted empty div returns
+      // a zero-height, zero-width rect in all major browsers, which makes it
+      // impossible to compute the real scroll offset needed.
+      const lineEl = getLineEl();
+      if (!lineEl) return;
+      const rect = lineEl.getBoundingClientRect();
+      const vvh = window.visualViewport ? window.visualViewport.height : window.innerHeight;
+      // Pad by 1.5 line-heights so the cursor never sits flush against the
+      // bottom edge (or the top of an on-screen keyboard on mobile).
+      const margin = (rect.height || 20) * 1.5;
+      if (rect.bottom > vvh - margin) {
+        window.scrollBy(0, rect.bottom - (vvh - margin));
+      } else if (rect.top < 0) {
+        window.scrollBy(0, rect.top - margin);
+      }
+    }
+
+    // ── Custom undo / redo ───────────────────────────────────────────────────
+    // The browser's native undo only tracks execCommand and keyboard input.
+    // Our DOM operations (list toggling, Enter splits, Tab, paste) bypass it,
+    // so undo either does nothing or partially restores state. We intercept
+    // Cmd+Z / Cmd+Shift+Z / Cmd+Y and mobile historyUndo/Redo beforeinput
+    // events, and manage our own HTML + {line,col} cursor snapshots.
+    const _undoStack = [];   // [{html, cur:{line,col}}]
+    const _redoStack = [];
+    let   _undoTimer         = null;
+    let   _historyGestureTimer = null; // debounces iOS historyUndo/Redo bursts
+    let   _undoApplying      = false;  // true while ZWS replenishment is running
+
+    // Save cursor as {line index in editor.children, col within that line}.
+    // Line-scoped col avoids the flat-char-offset ambiguity at div boundaries.
+    function _undoCurPos() {
+      const sel = window.getSelection();
+      if (!sel || !sel.rangeCount) return { line: 0, col: 0 };
+      const range = sel.getRangeAt(0);
+      const lineEl = getLineEl();
+      if (!lineEl) return { line: 0, col: 0 };
+      const line = Array.from(editor.children).indexOf(lineEl);
+      try {
+        const r = document.createRange();
+        r.setStart(lineEl, 0);
+        r.setEnd(range.startContainer, range.startOffset);
+        return { line: Math.max(0, line), col: r.toString().length };
+      } catch { return { line: Math.max(0, line), col: 0 }; }
+    }
+
+    // Restore cursor to a saved {line, col} position.
+    function _undoSetCur(pos) {
+      if (!pos) return;
+      const lineEl = editor.children[pos.line] || editor.children[editor.children.length - 1];
+      if (!lineEl) return;
+      const walker = document.createTreeWalker(lineEl, NodeFilter.SHOW_TEXT);
+      let node, rem = pos.col;
+      while ((node = walker.nextNode())) {
+        const len = node.textContent.length;
+        if (rem <= len) {
+          try {
+            const r = document.createRange();
+            r.setStart(node, rem);
+            r.collapse(true);
+            window.getSelection().removeAllRanges();
+            window.getSelection().addRange(r);
+          } catch {}
+          return;
+        }
+        rem -= len;
+      }
+      // Fallback: start of the line element
+      try {
+        const r = document.createRange();
+        r.setStart(lineEl, 0);
+        r.collapse(true);
+        window.getSelection().removeAllRanges();
+        window.getSelection().addRange(r);
+      } catch {}
+    }
+
+    // Push a snapshot before any custom DOM operation.
+    // Cancels the debounced input timer so typing + a custom op
+    // don't split into two tiny undo steps.
+    function jotUndoSnap() {
+      clearTimeout(_undoTimer);
+      _undoTimer = null;
+      const state = { html: editor.innerHTML, cur: _undoCurPos() };
+      const last = _undoStack[_undoStack.length - 1];
+      if (last && last.html === state.html) return; // deduplicate
+      _undoStack.push(state);
+      if (_undoStack.length > 200) _undoStack.shift();
+      _redoStack.length = 0;
+    }
+
+    // Flush a pending input-debounce snapshot without clearing the redo branch.
+    function _undoFlush() {
+      if (!_undoTimer) return;
+      clearTimeout(_undoTimer);
+      _undoTimer = null;
+      const state = { html: editor.innerHTML, cur: _undoCurPos() };
+      const last = _undoStack[_undoStack.length - 1];
+      if (!last || last.html !== state.html) {
+        _undoStack.push(state);
+        if (_undoStack.length > 200) _undoStack.shift();
+      }
+    }
+
+    function _undoApply(state) {
+      editor.innerHTML = state.html;
+      _undoSetCur(state.cur);
+      clearTimeout(jotTimer);
+      if (jotCurrentId) jotTimer = setTimeout(jotSaveCurrent, 500);
+      // On touch devices, iOS keeps its own native undo stack (~6 entries).
+      // Each e.preventDefault() on a historyUndo event pops one native entry
+      // without adding a replacement, so after ~6 undos iOS reports "nothing
+      // to undo". Fix: insert a zero-width space via execCommand (which adds
+      // one native entry), then strip it from the DOM directly via TreeWalker
+      // (no execCommand → no second native entry). This refills the native
+      // stack by one entry per undo step, keeping it perpetually non-empty.
+      if (window.matchMedia('(pointer: coarse)').matches) {
+        _undoApplying = true;
+        setTimeout(() => {
+          try {
+            editor.focus();
+            // Helper: place cursor at the very start of the editor.
+            function _cursorToStart() {
+              const el = editor.firstChild;
+              if (!el) return;
+              const r = document.createRange();
+              r.setStart(el, 0);
+              r.collapse(true);
+              window.getSelection().removeAllRanges();
+              window.getSelection().addRange(r);
+            }
+
+            // ── Replenish native UNDO stack ──────────────────────────────────
+            // insertText adds one entry to the native undo stack and clears
+            // the native redo stack. Stripping the ZWS directly from the DOM
+            // (via TreeWalker, not execCommand) leaves the content at state.html
+            // without adding a second entry — so native undo gains one token.
+            _cursorToStart();
+            document.execCommand('insertText', false, '​');
+            const walker = document.createTreeWalker(editor, NodeFilter.SHOW_TEXT);
+            let node;
+            while ((node = walker.nextNode())) {
+              if (node.textContent.includes('​'))
+                node.textContent = node.textContent.replace(/​/g, '');
+            }
+
+            // ── Replenish native REDO stack ──────────────────────────────────
+            // Insert a second ZWS, then immediately call execCommand('undo').
+            // That moves the ZWS entry from native undo → native redo and
+            // restores the DOM to state.html, giving iOS a redo token to fire
+            // historyRedo on (so the redo gesture and keyboard-accessory button
+            // stay enabled). The beforeinput handler lets this programmatic
+            // undo through (returns early) while _undoApplying is true, so our
+            // custom _doUndo() is not triggered. _undoApplying is released in a
+            // nested setTimeout so any async historyUndo that execCommand('undo')
+            // might dispatch also arrives while the gate is still up.
+            _cursorToStart();
+            document.execCommand('insertText', false, '​');
+            document.execCommand('undo');
+
+          } catch (_) {}
+          // Restore cursor, then release the gate one task later so any async
+          // beforeinput from execCommand('undo') still sees _undoApplying = true.
+          _undoSetCur(state.cur);
+          setTimeout(() => { _undoApplying = false; }, 0);
+        }, 0);
+      }
+    }
+
+    // Perform one undo step. Handles two cases:
+    //  • Current HTML matches the stack top (normal case after debounced flush):
+    //    pop top to redo, apply the entry below it.
+    //  • Current HTML differs from stack top (operation ran but post-op state
+    //    was never pushed — e.g. Enter pressed then immediately Cmd+Z):
+    //    push current directly to redo, then restore the stack top.
+    function _doUndo() {
+      _undoFlush();
+      if (!_undoStack.length) return;
+      const curHtml = editor.innerHTML;
+      const top = _undoStack[_undoStack.length - 1];
+      if (top.html !== curHtml) {
+        // Un-checkpointed current state → save to redo, restore checkpoint
+        _redoStack.push({ html: curHtml, cur: _undoCurPos() });
+        _undoApply(top);
+      } else if (_undoStack.length > 1) {
+        _redoStack.push(_undoStack.pop());
+        _undoApply(_undoStack[_undoStack.length - 1]);
+      }
+    }
+
+    function _doRedo() {
+      if (!_redoStack.length) return;
+      const state = _redoStack.pop();
+      const curHtml = editor.innerHTML;
+      const top = _undoStack[_undoStack.length - 1];
+      if (!top || top.html !== curHtml) {
+        _undoStack.push({ html: curHtml, cur: _undoCurPos() });
+        if (_undoStack.length > 200) _undoStack.shift();
+      }
+      _undoApply(state);
+    }
+
+    function jotUndoClear() {
+      _undoStack.length = 0;
+      _redoStack.length = 0;
+      clearTimeout(_undoTimer);
+      _undoTimer = null;
+      clearTimeout(_historyGestureTimer);
+      _historyGestureTimer = null;
+      _undoApplying = false;
+    }
+
+    function doTab(shift) {
+      jotUndoSnap();
+      const lineEl = getLineEl();
+      if (!lineEl) return;
+      const isList = lineEl.classList.contains('list-line');
+      if (!isList) {
+        if (!shift) {
+          const col = getCursorColumn(lineEl);
+          document.execCommand('insertText', false, ' '.repeat(6 - (col % 6)));
+        } else {
+          const col = getCursorColumn(lineEl);
+          if (col > 0) setCursorAtColumn(lineEl, Math.floor((col - 1) / 6) * 6);
+        }
+        return;
+      }
+      const sel = window.getSelection();
+      if (sel && !sel.isCollapsed && sel.rangeCount) {
+        const r = sel.getRangeAt(0);
+        const targets = Array.from(editor.children).filter(l => l.classList.contains('list-line') && r.intersectsNode(l));
+        if (targets.length > 1) {
+          targets.forEach(l => setLevel(l, shift ? getLevel(l) - 1 : getLevel(l) + 1));
+          return;
+        }
+      }
+      setLevel(lineEl, shift ? getLevel(lineEl) - 1 : getLevel(lineEl) + 1);
+    }
+
+    function doUnderline() {
+      const sel = window.getSelection();
+      if (!sel || !sel.rangeCount) return;
+      const range = sel.getRangeAt(0);
+      const uEls = new Set();
+      let node = range.startContainer.nodeType === Node.TEXT_NODE
+        ? range.startContainer.parentNode : range.startContainer;
+      while (node && node !== editor) {
+        if (node.nodeName === 'U') uEls.add(node);
+        node = node.parentNode;
+      }
+      if (!range.collapsed) {
+        editor.querySelectorAll('u').forEach(u => {
+          if (range.intersectsNode(u)) uEls.add(u);
+        });
+      }
+      if (uEls.size) {
+        uEls.forEach(u => u.style.textDecoration = 'underline');
+        document.execCommand('underline');
+        editor.querySelectorAll('u').forEach(u => u.style.removeProperty('text-decoration'));
+      } else {
+        document.execCommand('underline');
+      }
+    }
+
+    function doEscape() {
+      if (jotExported) return;
+      if (jotFromRecovery) { jotFromRecovery = false; jotShowRecovery(); return; }
+      jotSaveCurrent();
+      jotShowWelcome(jotLoad());
+    }
+
+    // On touch devices, override execCommand so the native iOS B/I/U text-selection
+    // popover has no effect. Our toolbar sets jotAllowFormat=true before calling.
+    let jotAllowFormat = false;
+    if (window.matchMedia('(pointer: coarse)').matches) {
+      const _execCmd = document.execCommand.bind(document);
+      document.execCommand = function (cmd, ...args) {
+        if (!jotAllowFormat && /^(bold|italic|underline)$/i.test(cmd)) return false;
+        return _execCmd(cmd, ...args);
+      };
+    }
+
+    // Suppress the iOS context menu (Cut / Copy / Paste / AutoFill) that appears
+    // on tap or selection. Combined with -webkit-touch-callout:none in CSS this
+    // covers both the long-press callout and the programmatic context event.
+    editor.addEventListener('contextmenu', e => e.preventDefault());
+
+    editor.addEventListener('keydown', (e) => {
+      const _jw = document.getElementById('jot-welcome');
+      if (_jw && _jw.querySelector('.jot-entry-selected') && (e.key === 'Enter' || e.key === ' ')) {
+        e.preventDefault();
+        return;
+      }
+
+      if ((e.metaKey || e.ctrlKey) && e.key === 'z' && !e.shiftKey) {
+        e.preventDefault();
+        _doUndo();
+        return;
+      }
+
+      if ((e.metaKey || e.ctrlKey) && (e.key === 'y' || (e.key === 'z' && e.shiftKey))) {
+        e.preventDefault();
+        _doRedo();
+        return;
+      }
+
+      if ((e.metaKey || e.ctrlKey) && e.key === 's') {
+        if (jotExported) {
+          // Exported file: set title to the HTML filename right now so the
+          // browser's "Save Page As" dialog sees it immediately. The title was
+          // also set at load time (for the tab label), but it must be re-set
+          // here because the dialog reads document.title at the instant the
+          // keydown fires — any earlier assignment can be overridden by the
+          // browser restoring its own title state between load and save.
+          const _r = window.location.href.split('/').pop().split('?')[0].split('#')[0];
+          const _n = decodeURIComponent(_r).replace(/\.html$/i, '').replace(/\s+/g, '_');
+          if (_n) document.title = _n;
+          // No reset: the exported file's tab should always show the filename.
+        } else {
+          // Live app: temporarily rename the tab to the first line of text so
+          // the "Save Page As" dialog defaults to a meaningful filename,
+          // then restore 'Jot' after the dialog has had a chance to read it.
+          const first = jotFirstLine();
+          document.title = first ? first.replace(/\s+/g, '_') : 'jot';
+          setTimeout(() => { document.title = 'Jot'; }, 1000);
+        }
+        return;
+      }
+
+      if ((e.metaKey || e.ctrlKey) && e.key === 'b') {
+        e.preventDefault();
+        jotUndoSnap(); jotAllowFormat = true; document.execCommand('bold'); jotAllowFormat = false;
+        return;
+      }
+
+      if ((e.metaKey || e.ctrlKey) && e.key === 'i') {
+        e.preventDefault();
+        jotUndoSnap(); jotAllowFormat = true; document.execCommand('italic'); jotAllowFormat = false;
+        return;
+      }
+
+      if ((e.metaKey || e.ctrlKey) && e.key === 'u') {
+        e.preventDefault();
+        jotUndoSnap(); jotAllowFormat = true; doUnderline(); jotAllowFormat = false;
+        return;
+      }
+
+      const lineEl = getLineEl();
+      if (!lineEl) return;
+      const isList = lineEl.classList.contains('list-line');
+
+      if (e.key === '-' && isAtStart(lineEl)) {
+        e.preventDefault();
+        jotUndoSnap();
+        if (!isList) { lineEl.classList.add('list-line'); setLevel(lineEl, 0); }
+        lineEl.removeAttribute('data-bullet');
+        return;
+      }
+
+      if (e.key === '>' && isAtStart(lineEl)) {
+        e.preventDefault();
+        jotUndoSnap();
+        if (!isList) { lineEl.classList.add('list-line'); setLevel(lineEl, 0); }
+        lineEl.dataset.bullet = 'arrow';
+        return;
+      }
+
+      if (e.key === '+' && isAtStart(lineEl)) {
+        e.preventDefault();
+        jotUndoSnap();
+        if (!isList) { lineEl.classList.add('list-line'); setLevel(lineEl, 0); }
+        lineEl.dataset.bullet = 'plus';
+        return;
+      }
+
+      if (e.key === 'Tab') {
+        e.preventDefault();
+        doTab(e.shiftKey);
+        return;
+      }
+
+      if (e.key === 'Enter' && !isList && !e.shiftKey) {
+        _jotEnterHandled = true;
+        e.preventDefault();
+        jotUndoSnap();
+        const sel = window.getSelection();
+        const range = sel.getRangeAt(0);
+        range.deleteContents();
+        const afterRange = range.cloneRange();
+        afterRange.setEnd(lineEl, lineEl.childNodes.length);
+        const fragment = afterRange.extractContents();
+        const newLine = document.createElement('div');
+        newLine.appendChild(plainNodes(fragment));
+        if (!newLine.textContent && !newLine.querySelector('br')) newLine.innerHTML = '<br>';
+        lineEl.after(newLine);
+        if (!lineEl.textContent && !lineEl.querySelector('br')) lineEl.innerHTML = '<br>';
+        const newRange = document.createRange();
+        newRange.setStart(newLine, 0);
+        newRange.collapse(true);
+        sel.removeAllRanges();
+        sel.addRange(newRange);
+        requestAnimationFrame(jotScrollToCursor);
+        return;
+      }
+
+      if (!isList) return;
+
+      if (e.key === 'Backspace' && isAtStart(lineEl)) {
+        e.preventDefault();
+        jotUndoSnap();
+        lineEl.classList.remove('list-line');
+        lineEl.style.removeProperty('--level');
+        return;
+      }
+
+      if (e.key === 'Enter' && e.shiftKey) {
+        _jotEnterHandled = true;
+        e.preventDefault();
+        jotUndoSnap();
+        const sel = window.getSelection();
+        const range = sel.getRangeAt(0);
+        range.deleteContents();
+        const br = document.createElement('br');
+        range.insertNode(br);
+        const space = document.createTextNode(' ');
+        br.after(space);
+        const newRange = document.createRange();
+        newRange.setStart(space, 0);
+        newRange.collapse(true);
+        sel.removeAllRanges();
+        sel.addRange(newRange);
+        requestAnimationFrame(jotScrollToCursor);
+        return;
+      }
+
+      if (e.key === 'Enter' && !e.shiftKey && !lineEl.textContent.trim()) {
+        // Empty list line + Enter → de-list it (same as Backspace at start).
+        _jotEnterHandled = true;
+        e.preventDefault();
+        jotUndoSnap();
+        lineEl.classList.remove('list-line');
+        lineEl.style.removeProperty('--level');
+        lineEl.removeAttribute('data-bullet');
+        requestAnimationFrame(jotScrollToCursor);
+        return;
+      }
+
+      if (e.key === 'Enter' && !e.shiftKey) {
+        _jotEnterHandled = true;
+        e.preventDefault();
+        jotUndoSnap();
+        const sel = window.getSelection();
+        const range = sel.getRangeAt(0);
+        range.deleteContents();
+        const afterRange = range.cloneRange();
+        afterRange.setEnd(lineEl, lineEl.childNodes.length);
+        const fragment = afterRange.extractContents();
+        const newLine = document.createElement('div');
+        newLine.classList.add('list-line');
+        setLevel(newLine, getLevel(lineEl));
+        if (lineEl.dataset.bullet) newLine.dataset.bullet = lineEl.dataset.bullet;
+        newLine.appendChild(fragment);
+        if (!newLine.textContent && !newLine.querySelector('br')) newLine.innerHTML = '<br>';
+        lineEl.after(newLine);
+        if (!lineEl.textContent && !lineEl.querySelector('br')) lineEl.innerHTML = '<br>';
+        const newRange = document.createRange();
+        newRange.setStart(newLine, 0);
+        newRange.collapse(true);
+        sel.removeAllRanges();
+        sel.addRange(newRange);
+        requestAnimationFrame(jotScrollToCursor);
+        return;
+      }
+    });
+
+    // ── Local storage ────────────────────────────────────────────────────────
+    const JOT_KEY = 'jot_entries';
+    const JOT_BACKUP_KEY = 'jot_backups';
+
+    function jotLoad() {
+      try { return JSON.parse(localStorage.getItem(JOT_KEY) || '[]'); } catch { return []; }
+    }
+
+    function jotPersist(entries) {
+      localStorage.setItem(JOT_KEY, JSON.stringify(entries));
+    }
+
+    function jotBackup(entry) {
+      let backups;
+      try { backups = JSON.parse(localStorage.getItem(JOT_BACKUP_KEY) || '[]'); } catch { backups = []; }
+      backups.unshift({
+        id: Date.now() + '_' + Math.random().toString(36).slice(2),
+        html: entry.html,
+        firstLine: entry.firstLine,
+        openedAt: new Date().toISOString()
+      });
+      localStorage.setItem(JOT_BACKUP_KEY, JSON.stringify(backups.slice(0, 10)));
+    }
+
+    let jotCurrentId = null;
+    let jotExported = false;
+    let jotFromRecovery = false; // true while a Recovery snapshot is open
+
+    function jotFirstLine() {
+      return (editor.children[0] || { textContent: '' }).textContent.trim();
+    }
+
+    function jotSaveCurrent() {
+      if (jotExported || !jotCurrentId) return;
+      const entries = jotLoad();
+      const entry = entries.find(e => e.id === jotCurrentId);
+      if (!entry) return;
+      entry.html = editor.innerHTML;
+      entry.firstLine = jotFirstLine();
+      entry.updatedAt = new Date().toISOString();
+      jotPersist(entries);
+    }
+
+    function jotCreate() {
+      if (jotExported) return;
+      const now = new Date().toISOString();
+      jotCurrentId = now + '_' + Math.random().toString(36).slice(2);
+      const entries = jotLoad();
+      entries.push({ id: jotCurrentId, html: editor.innerHTML, firstLine: jotFirstLine(), createdAt: now, updatedAt: now });
+      jotPersist(entries);
+    }
+
+    function jotFmt(iso) {
+      const d = new Date(iso), p = n => String(n).padStart(2, '0');
+      return `${p(d.getDate())}/${p(d.getMonth()+1)}/${d.getFullYear()} ${p(d.getHours())}:${p(d.getMinutes())}`;
+    }
+
+    function jotEsc(t) {
+      return t.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    }
+
+    function jotOpenEntry(entry) {
+      jotBackup(entry);
+      const w = document.getElementById('jot-welcome');
+      if (w) w.remove();
+      editor.innerHTML = entry.html;
+      jotUndoClear();
+      _undoStack.push({ html: editor.innerHTML, cur: 0 });
+      jotCurrentId = entry.id;
+      jotFromRecovery = false;
+      editor.focus();
+      const first = editor.firstChild;
+      if (first) {
+        const r = document.createRange();
+        r.setStart(first, 0);
+        r.collapse(true);
+        const sel = window.getSelection();
+        sel.removeAllRanges();
+        sel.addRange(r);
+      }
+    }
+
+    function jotStartNew() {
+      const w = document.getElementById('jot-welcome');
+      if (w) w.remove();
+      jotCurrentId = null;
+      jotFromRecovery = false;
+      editor.innerHTML = '<div><br></div>';
+      jotUndoClear();
+      _undoStack.push({ html: editor.innerHTML, cur: 0 });
+      editor.focus();
+      const first = editor.firstChild;
+      if (first) {
+        const r = document.createRange();
+        r.setStart(first, 0);
+        r.collapse(true);
+        const sel = window.getSelection();
+        sel.removeAllRanges();
+        sel.addRange(r);
+      }
+    }
+
+    function jotShowWelcome(entries) {
+      jotToolbarHide();
+      const cleaned = entries.filter(e => e.firstLine && e.firstLine.trim());
+      if (cleaned.length !== entries.length) jotPersist(cleaned);
+      // Nothing to show → seed the feature doc and reload so the user lands on
+      // a populated start screen rather than a blank one.
+      if (!cleaned.length) { jotSeedFeatures(); location.reload(); return; }
+      const sorted = [...cleaned].sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt));
+      const _existing = document.getElementById('jot-welcome');
+      if (_existing) _existing.remove();
+      const w = document.createElement('div');
+      w.id = 'jot-welcome';
+
+      let html = '<div><b>Jot</b></div><div><i>Start typing!</i></div><div><br></div>';
+
+      if (sorted.length) {
+        html += '<div><br></div>';
+        html += '<div class="jot-new">+ Start a new jot</div>';
+        html += '<div><br></div><div><br></div>';
+        sorted.forEach((entry, i) => {
+          if (i > 0) html += '<div><br></div>';
+          html += `<div class="jot-entry" data-id="${entry.id}">[${jotFmt(entry.updatedAt)}] ${jotEsc(entry.firstLine || '(empty)')}</div>`;
+        });
+        html += '<div><br></div><div><br></div>';
+        html += '<div class="jot-entry" data-recovery="1">Recovery</div>';
+        html += '<div><br></div>';
+        html += '<div class="jot-clear">Reset (Backspace)</div>';
+      }
+
+      html += '<div><br></div><div><u>v8</u></div><div><u>Lukas Henning 19/05/2026</u></div><div><br></div>';
+      w.innerHTML = html;
+      document.body.appendChild(w);
+      w.scrollTop = 0;
+
+      w.addEventListener('click', e => {
+        if (e.target.closest('.jot-new')) {
+          jotStartNew();
+          return;
+        }
+        const entryEl = e.target.closest('.jot-entry');
+        if (entryEl) {
+          if (entryEl.dataset.recovery) { jotShowRecovery(); return; }
+          const entry = cleaned.find(en => en.id === entryEl.dataset.id);
+          if (entry) jotOpenEntry(entry);
+          return;
+        }
+        if (e.target.closest('.jot-clear')) {
+          jotShowClearConfirm();
+        }
+      });
+    }
+
+    function jotSeedFeatures() {
+      const now = new Date().toISOString();
+      const featHtml = document.getElementById('jot-features-tpl').innerHTML;
+      const entries = [{ id: now + '_features', html: featHtml, firstLine: 'Jot Features', createdAt: now, updatedAt: now }];
+      jotPersist(entries);
+      return entries;
+    }
+
+    function jotShowClearConfirm() {
+      const old = document.getElementById('jot-welcome');
+      if (old) old.remove();
+
+      const w = document.createElement('div');
+      w.id = 'jot-welcome';
+      w.dataset.screen = 'confirm';
+
+      w.innerHTML = [
+        '<div><b>Clearing Jot’s memory</b></div>',
+        '<div><i>Do you really wish to delete all your jots and snapshots?</i></div>',
+        '<div><br></div>',
+        '<div class="jot-entry" data-confirm="yes"><b>Yes</b>, delete them all.</div>',
+        '<div><br></div>',
+        '<div class="jot-entry" data-confirm="no"><b>No</b>, take me back.</div>',
+        '<div><br></div>',
+        '<div><i>Hint: You can remove individual entries by deleting all their text content.</i></div>',
+      ].join('');
+
+      document.body.appendChild(w);
+      w.scrollTop = 0;
+
+      w.addEventListener('click', e => {
+        const entryEl = e.target.closest('.jot-entry[data-confirm]');
+        if (!entryEl) return;
+        if (entryEl.dataset.confirm === 'yes') {
+          localStorage.removeItem(JOT_KEY);
+          localStorage.removeItem(JOT_BACKUP_KEY);
+          w.remove();
+          jotShowWelcome([]);
+        } else {
+          jotShowWelcome(jotLoad());
+        }
+      });
+    }
+
+    function jotShowRecovery() {
+      let backups;
+      try { backups = JSON.parse(localStorage.getItem(JOT_BACKUP_KEY) || '[]'); } catch { backups = []; }
+
+      const old = document.getElementById('jot-welcome');
+      if (old) old.remove();
+
+      const w = document.createElement('div');
+      w.id = 'jot-welcome';
+      w.dataset.screen = 'recovery';
+
+      let html = '<div><b>Recovery</b></div>';
+      html += '<div><i>These are snapshots of documents you recently opened.</i></div>';
+      html += '<div><br></div>';
+
+      if (backups.length) {
+        backups.forEach((b, i) => {
+          if (i > 0) html += '<div><br></div>';
+          html += `<div class="jot-entry" data-backup-idx="${i}">[${jotFmt(b.openedAt)}] ${jotEsc(b.firstLine || '(empty)')}</div>`;
+        });
+      } else {
+        html += '<div><i>No snapshots yet.</i></div>';
+      }
+
+      w.innerHTML = html;
+      document.body.appendChild(w);
+      w.scrollTop = 0;
+
+      w.addEventListener('click', e => {
+        const entryEl = e.target.closest('.jot-entry[data-backup-idx]');
+        if (!entryEl) return;
+        const idx = parseInt(entryEl.dataset.backupIdx, 10);
+        const backup = backups[idx];
+        if (!backup) return;
+        w.remove();
+        editor.innerHTML = backup.html;
+        jotCurrentId = null;
+        jotFromRecovery = true;
+        editor.focus();
+        const first = editor.firstChild;
+        if (first) {
+          const r = document.createRange();
+          r.setStart(first, 0);
+          r.collapse(true);
+          const sel = window.getSelection();
+          sel.removeAllRanges();
+          sel.addRange(r);
+        }
+      });
+
+      // Left-edge swipe right → back to start screen (touch devices only).
+      if (window.matchMedia('(pointer: coarse)').matches) {
+        let _rSwipeX = 0, _rSwipeY = 0, _rSwipeT = 0;
+        w.addEventListener('touchstart', e => {
+          if (e.touches.length !== 1) { _rSwipeX = 0; return; }
+          _rSwipeX = e.touches[0].clientX;
+          _rSwipeY = e.touches[0].clientY;
+          _rSwipeT = Date.now();
+        }, { passive: true });
+        w.addEventListener('touchend', e => {
+          if (!_rSwipeX || e.changedTouches.length !== 1) return;
+          const dx = e.changedTouches[0].clientX - _rSwipeX;
+          const dy = e.changedTouches[0].clientY - _rSwipeY;
+          const dt = Date.now() - _rSwipeT;
+          const startX = _rSwipeX;
+          _rSwipeX = 0;
+          if (dx < 60 || Math.abs(dx) <= Math.abs(dy) * 1.5 || dt >= 400 || startX >= 60) return;
+          jotShowWelcome(jotLoad());
+        }, { passive: true });
+      }
+    }
+
+    // Init
+    (function() {
+      const editorEmpty = editor.children.length === 1
+        && !editor.children[0].textContent
+        && editor.children[0].innerHTML.trim() === '<br>';
+      if (!editorEmpty) {
+        jotExported = true;
+        // Set the page title to the HTML filename immediately so the browser's
+        // Cmd+S save dialog always proposes the correct name, regardless of
+        // editor focus state. Spaces become underscores to keep filenames clean.
+        const _raw = window.location.href.split('/').pop().split('?')[0].split('#')[0];
+        const _fname = decodeURIComponent(_raw).replace(/\.html$/i, '').replace(/\s+/g, '_');
+        if (_fname) document.title = _fname;
+        editor.focus();
+        return;
+      }
+      jotShowWelcome(jotLoad());
+    })();
+
+    // Welcome screen key handling
+    document.addEventListener('keydown', e => {
+      const w = document.getElementById('jot-welcome');
+      if (w) {
+        const entryEls = Array.from(w.querySelectorAll('.jot-entry'));
+        const selEl = w.querySelector('.jot-entry-selected');
+        const selIdx = selEl ? entryEls.indexOf(selEl) : -1;
+
+        if (e.key === 'ArrowDown') {
+          e.preventDefault();
+          if (selEl) selEl.classList.remove('jot-entry-selected');
+          const next = entryEls[Math.min(selIdx + 1, entryEls.length - 1)];
+          if (next) next.classList.add('jot-entry-selected');
+        } else if (e.key === 'ArrowUp') {
+          e.preventDefault();
+          if (selEl) selEl.classList.remove('jot-entry-selected');
+          if (selIdx > 0) entryEls[selIdx - 1].classList.add('jot-entry-selected');
+        } else if ((e.key === 'Enter' || e.key === ' ') && selEl) {
+          e.preventDefault();
+          selEl.click();
+        } else if (e.key === 'Escape' && (w.dataset.screen === 'recovery' || w.dataset.screen === 'confirm')) {
+          e.preventDefault();
+          jotShowWelcome(jotLoad());
+        } else if (e.key === 'Backspace' && !w.dataset.screen) {
+          e.preventDefault();
+          jotShowClearConfirm();
+        } else if (e.key !== 'Escape' && !e.metaKey && !e.ctrlKey && !e.altKey && !w.dataset.screen) {
+          w.remove();
+          jotCurrentId = null;
+          if (!e.defaultPrevented) {
+            // The editor's keydown handler did not claim this key, so reset to
+            // a clean first line and let the character be typed normally.
+            editor.innerHTML = '<div><br></div>';
+            editor.focus();
+            const _first = editor.firstChild;
+            if (_first) {
+              const _r = document.createRange();
+              _r.setStart(_first, 0);
+              _r.collapse(true);
+              const _sel = window.getSelection();
+              _sel.removeAllRanges();
+              _sel.addRange(_r);
+            }
+          }
+          // If e.defaultPrevented, the editor's keydown handler already acted
+          // (e.g. converted the first line to a list via -, >, or +) — keep
+          // that result and do not reset the editor content.
+        }
+      } else if (e.key === 'Escape' && !jotExported) {
+        e.preventDefault();
+        doEscape();
+      }
+    });
+
+    // Auto-save
+    let jotTimer = null;
+    editor.addEventListener('input', () => {
+      // Suppress spurious snapshots while ZWS replenishment is running.
+      if (_undoApplying) return;
+      const w = document.getElementById('jot-welcome');
+      if (w) w.remove();
+      if (!jotCurrentId) jotCreate();
+      clearTimeout(jotTimer);
+      jotTimer = setTimeout(jotSaveCurrent, 500);
+      // Scroll so the cursor never sits flush against the bottom of the viewport
+      // (or the top of the on-screen keyboard). Use rAF so layout is settled.
+      requestAnimationFrame(jotScrollToCursor);
+      // Debounced undo snapshot for regular typing — groups keystrokes within
+      // 800 ms into a single undo step; a custom op calling jotUndoSnap()
+      // cancels this timer and pushes immediately.
+      clearTimeout(_undoTimer);
+      _undoTimer = setTimeout(() => {
+        _undoTimer = null;
+        const state = { html: editor.innerHTML, cur: _undoCurPos() };
+        const last = _undoStack[_undoStack.length - 1];
+        if (!last || last.html !== state.html) {
+          _undoStack.push(state);
+          if (_undoStack.length > 200) _undoStack.shift();
+          _redoStack.length = 0;
+        }
+      }, 800);
+    });
+
+    function htmlToLines(str) {
+      const root = document.createElement('div');
+      root.innerHTML = str;
+      const lines = [];
+
+      function si(node) {
+        if (node.nodeType === Node.TEXT_NODE)
+          return node.textContent.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+        if (node.nodeName === 'BR') return '<br>';
+        if (node.nodeName === 'IMG') return '<img src="' + (node.getAttribute('src') || '') + '" class="jot-img">';
+        const inner = () => Array.from(node.childNodes).map(si).join('');
+        const t = node.nodeName;
+        if (t === 'B' || t === 'STRONG') return '<b>' + inner() + '</b>';
+        if (t === 'I' || t === 'EM') return '<i>' + inner() + '</i>';
+        if (t === 'U') return '<u>' + inner() + '</u>';
+        if (t === 'A') {
+          const href = (node.getAttribute('href') || '').replace(/&/g,'&amp;').replace(/"/g,'&quot;');
+          return '<a href="' + href + '" target="_blank" rel="noopener noreferrer">' + inner() + '</a>';
+        }
+        return inner();
+      }
+
+      function processLI(li, level) {
+        let html = '';
+        const sublists = [];
+        for (const c of li.childNodes) {
+          if (c.nodeName === 'UL' || c.nodeName === 'OL') sublists.push(c);
+          else if (c.nodeName === 'P') html += Array.from(c.childNodes).map(si).join('');
+          else html += si(c);
+        }
+        lines.push({ type: 'list', level, html, bullet: li.dataset.bullet || null });
+        for (const sl of sublists)
+          for (const c of sl.children)
+            if (c.nodeName === 'LI') processLI(c, level + 1);
+      }
+
+      function processBlock(node) {
+        if (node.nodeType === Node.TEXT_NODE) {
+          const t = node.textContent.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+          if (t.trim()) lines.push({ type: 'p', level: 0, html: t });
+          return;
+        }
+        const tag = node.nodeName;
+        if (tag === 'P' || tag === 'DIV') {
+          if (node.classList && node.classList.contains('list-line')) {
+            const lv = parseInt(node.style.getPropertyValue('--level') || '0', 10);
+            lines.push({ type: 'list', level: lv, html: Array.from(node.childNodes).map(si).join('') });
+          } else {
+            lines.push({ type: 'p', level: 0, html: Array.from(node.childNodes).map(si).join('') });
+          }
+        } else if (tag === 'UL' || tag === 'OL') {
+          for (const c of node.children)
+            if (c.nodeName === 'LI') processLI(c, 0);
+        } else if (/^H[1-6]$/.test(tag)) {
+          lines.push({ type: 'p', level: 0, html: Array.from(node.childNodes).map(si).join('') });
+        } else {
+          for (const c of node.childNodes) processBlock(c);
+        }
+      }
+
+      for (const c of root.childNodes) processBlock(c);
+      return lines;
+    }
+
+    // Open links on click. In contenteditable, a click normally just moves the
+    // cursor; this handler additionally opens the href in a new tab.
+    editor.addEventListener('click', e => {
+      const a = e.target.closest('a[href]');
+      if (a && editor.contains(a)) window.open(a.href, '_blank', 'noopener,noreferrer');
+    });
+
+    editor.addEventListener('paste', (e) => {
+      jotUndoSnap();
+      // URL-as-link: if there is a non-collapsed selection and the clipboard
+      // holds only a URL (https?://... with no whitespace), wrap the selected
+      // text in an <a> element pointing to that URL instead of replacing it.
+      const plainText = (e.clipboardData.getData('text/plain') || '').trim();
+      const sel = window.getSelection();
+      if (plainText && sel && !sel.isCollapsed && sel.rangeCount &&
+          /^https?:\/\/\S+$/.test(plainText)) {
+        const range = sel.getRangeAt(0);
+        // Restrict to single-line selections — wrapping block elements inside
+        // an inline <a> produces invalid HTML. Rather than comparing container
+        // references (brittle when browsers snap the end to the next sibling),
+        // inspect what the selection actually contains: block children mean the
+        // selection spans multiple lines.
+        const selFrag = range.cloneContents();
+        const spansMultipleLines = Array.from(selFrag.childNodes).some(
+          n => n.nodeType === Node.ELEMENT_NODE && /^(DIV|P|UL|OL|LI)$/.test(n.nodeName)
+        );
+        if (!spansMultipleLines) {
+          e.preventDefault();
+          // Serialize the selected DOM (preserves bold/italic/underline inside
+          // the selection) so we can wrap it with insertHTML, which registers
+          // the operation on the browser's undo stack — direct DOM manipulation
+          // (extractContents + insertNode) does not, breaking Cmd+Z.
+          const tmp = document.createElement('div');
+          tmp.appendChild(range.cloneContents());
+          const escapedHref = plainText.replace(/&/g,'&amp;').replace(/"/g,'&quot;');
+          const linkHTML = '<a href="' + escapedHref + '" target="_blank" rel="noopener noreferrer">' + tmp.innerHTML + '</a>';
+          document.execCommand('insertHTML', false, linkHTML);
+          return;
+        }
+      }
+
+      // Image paste: intercept before the browser inserts a raw <img> inline.
+      const imageItem = Array.from(e.clipboardData.items || []).find(it => it.type.startsWith('image/'));
+      if (imageItem) {
+        e.preventDefault();
+        const blob = imageItem.getAsFile();
+        if (!blob) return;
+        const w2 = document.getElementById('jot-welcome');
+        if (w2) w2.remove();
+        const reader = new FileReader();
+        reader.onload = ev => {
+          const src = ev.target.result;
+          const imgLine = document.createElement('div');
+          imgLine.innerHTML = '<img src="' + src + '" class="jot-img">';
+          const blankLine = document.createElement('div');
+          blankLine.innerHTML = '<br>';
+          const lineEl = getLineEl();
+          if (lineEl) {
+            lineEl.after(imgLine, blankLine);
+          } else {
+            editor.appendChild(imgLine);
+            editor.appendChild(blankLine);
+          }
+          const r = document.createRange();
+          r.setStart(blankLine, 0);
+          r.collapse(true);
+          const s = window.getSelection();
+          s.removeAllRanges();
+          s.addRange(r);
+          if (!jotCurrentId) jotCreate();
+          clearTimeout(jotTimer);
+          jotTimer = setTimeout(jotSaveCurrent, 500);
+        };
+        reader.readAsDataURL(blob);
+        return;
+      }
+
+      const htmlData = e.clipboardData.getData('text/html');
+      if (!htmlData || !htmlData.includes('<!-- jot -->')) return;
+      e.preventDefault();
+      const w = document.getElementById('jot-welcome');
+      if (w) w.remove();
+
+      const lines = htmlToLines(htmlData);
+      if (!lines.length) return;
+
+      // sel is already declared at the top of this handler
+      if (!sel || !sel.rangeCount) return;
+      const range = sel.getRangeAt(0);
+      if (!range.collapsed) range.deleteContents();
+
+      const lineEl = getLineEl();
+      if (!lineEl) return;
+
+      function ser(node) {
+        if (node.nodeType === Node.TEXT_NODE)
+          return node.textContent.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+        if (node.nodeName === 'BR') return '<br>';
+        if (node.nodeName === 'IMG') return '<img src="' + (node.getAttribute('src') || '') + '" class="jot-img">';
+        const inner = () => Array.from(node.childNodes).map(ser).join('');
+        if (node.nodeName === 'B') return '<b>' + inner() + '</b>';
+        if (node.nodeName === 'I') return '<i>' + inner() + '</i>';
+        if (node.nodeName === 'U') return '<u>' + inner() + '</u>';
+        if (node.nodeName === 'A') {
+          const href = (node.getAttribute('href') || '').replace(/&/g,'&amp;').replace(/"/g,'&quot;');
+          return '<a href="' + href + '" target="_blank" rel="noopener noreferrer">' + inner() + '</a>';
+        }
+        return inner();
+      }
+
+      const beforeR = document.createRange();
+      beforeR.setStart(lineEl, 0);
+      beforeR.setEnd(range.startContainer, range.startOffset);
+      const beforeHtml = Array.from(beforeR.cloneContents().childNodes).map(ser).join('');
+
+      const afterR = document.createRange();
+      afterR.setStart(range.startContainer, range.startOffset);
+      afterR.setEnd(lineEl, lineEl.childNodes.length);
+      const afterFrag = afterR.cloneContents();
+      const afterTextLen = afterFrag.textContent.length;
+      const afterHtml = afterTextLen > 0 ? Array.from(afterFrag.childNodes).map(ser).join('') : '';
+
+      const newEls = lines.map((line, i) => {
+        const div = document.createElement('div');
+        if (line.type === 'list') {
+          div.classList.add('list-line');
+          div.style.setProperty('--level', line.level);
+          if (line.bullet) div.dataset.bullet = line.bullet;
+        }
+        const content = (i === 0 ? beforeHtml : '') + line.html + (i === lines.length - 1 ? afterHtml : '');
+        div.innerHTML = content || '<br>';
+        return div;
+      });
+
+      const parent = lineEl.parentNode;
+      const next = lineEl.nextSibling;
+      lineEl.remove();
+      for (const el of newEls) parent.insertBefore(el, next);
+
+      const lastEl = newEls[newEls.length - 1];
+      setCursorAtColumn(lastEl, Math.max(0, lastEl.textContent.length - afterTextLen));
+
+      if (!jotCurrentId) jotCreate();
+      clearTimeout(jotTimer);
+      jotTimer = setTimeout(jotSaveCurrent, 500);
+    });
+
+    editor.addEventListener('copy', (e) => {
+      const sel = window.getSelection();
+      if (!sel || !sel.rangeCount || sel.isCollapsed) return;
+      e.preventDefault();
+
+      const range = sel.getRangeAt(0);
+      const selectedLines = Array.from(editor.children).filter(line => range.intersectsNode(line));
+      if (!selectedLines.length) return;
+
+      function esc(t) {
+        return t.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+      }
+
+      function serialize(node) {
+        if (node.nodeType === Node.TEXT_NODE) return esc(node.textContent);
+        if (node.nodeName === 'BR') return '<br>';
+        if (node.nodeName === 'IMG') return '<img src="' + (node.getAttribute('src') || '') + '" class="jot-img">';
+        const inner = () => Array.from(node.childNodes).map(serialize).join('');
+        if (node.nodeName === 'B') return '<b>' + inner() + '</b>';
+        if (node.nodeName === 'I') return '<i>' + inner() + '</i>';
+        if (node.nodeName === 'U') return '<u>' + inner() + '</u>';
+        if (node.nodeName === 'A') {
+          const href = (node.getAttribute('href') || '').replace(/&/g,'&amp;').replace(/"/g,'&quot;');
+          return '<a href="' + href + '" target="_blank" rel="noopener noreferrer">' + inner() + '</a>';
+        }
+        return inner();
+      }
+
+      function lineContent(lineEl, isFirst, isLast) {
+        const r = document.createRange();
+        r.selectNodeContents(lineEl);
+        if (isFirst && lineEl.contains(range.startContainer))
+          r.setStart(range.startContainer, range.startOffset);
+        if (isLast && lineEl.contains(range.endContainer))
+          r.setEnd(range.endContainer, range.endOffset);
+        return Array.from(r.cloneContents().childNodes).map(serialize).join('');
+      }
+
+      const blocks = [];
+      selectedLines.forEach((lineEl, i) => {
+        const isFirst = i === 0;
+        const isLast  = i === selectedLines.length - 1;
+        const html = lineContent(lineEl, isFirst, isLast);
+        if (lineEl.classList.contains('list-line')) {
+          // A list line that is only partially selected (selection clips either
+          // its start or its end) should paste as plain text, not as a bullet
+          // item — otherwise copying a single word inside a list line puts a
+          // bullet in front of it when pasted outside the editor.
+          let partial = false;
+          if (isFirst && lineEl.contains(range.startContainer)) {
+            try {
+              const tr = document.createRange();
+              tr.setStart(lineEl, 0);
+              tr.setEnd(range.startContainer, range.startOffset);
+              if (tr.toString() !== '') partial = true;
+            } catch (_) {}
+          }
+          if (!partial && isLast && lineEl.contains(range.endContainer)) {
+            try {
+              const tr = document.createRange();
+              tr.setStart(range.endContainer, range.endOffset);
+              tr.setEnd(lineEl, lineEl.childNodes.length);
+              if (tr.toString() !== '') partial = true;
+            } catch (_) {}
+          }
+          if (partial) {
+            blocks.push({ type: 'p', html: lineEl.textContent ? html : '' });
+          } else {
+            const level = getLevel(lineEl);
+            const last  = blocks[blocks.length - 1];
+            const bullet = lineEl.dataset.bullet || null;
+            if (last && last.type === 'list') last.items.push({ level, html, bullet });
+            else blocks.push({ type: 'list', items: [{ level, html, bullet }] });
+          }
+        } else {
+          blocks.push({ type: 'p', html: lineEl.textContent ? html : '' });
+        }
+      });
+
+      function buildList(items) {
+        let idx = 0;
+        function nest(depth) {
+          let out = '<ul>';
+          while (idx < items.length) {
+            const item = items[idx];
+            if (item.level < depth) break;
+            if (item.level > depth) {
+              out += '<li>' + nest(item.level) + '</li>';
+            } else {
+              idx++;
+              let li = '<p>' + item.html + '</p>';
+              if (idx < items.length && items[idx].level > depth) li += nest(items[idx].level);
+              out += '<li' + (item.bullet ? ` data-bullet="${item.bullet}"` : '') + '>' + li + '</li>';
+            }
+          }
+          return out + '</ul>';
+        }
+        return nest(items[0]?.level ?? 0);
+      }
+
+      let htmlOut = '';
+      for (const block of blocks) {
+        htmlOut += block.type === 'p'
+          ? '<p>' + block.html + '</p>'
+          : buildList(block.items);
+      }
+
+      e.clipboardData.setData('text/html', '<!-- jot -->' + htmlOut);
+      e.clipboardData.setData('text/plain', selectedLines.map((lineEl, i) => {
+        // Clip first/last lines to the actual selection boundaries, just like
+        // lineContent() does for the HTML path — otherwise a partial selection
+        // puts the whole line on the clipboard for external paste targets.
+        const isFirst = i === 0;
+        const isLast  = i === selectedLines.length - 1;
+        const r = document.createRange();
+        r.selectNodeContents(lineEl);
+        if (isFirst && lineEl.contains(range.startContainer))
+          r.setStart(range.startContainer, range.startOffset);
+        if (isLast && lineEl.contains(range.endContainer))
+          r.setEnd(range.endContainer, range.endOffset);
+        const text = r.toString();
+        if (lineEl.classList.contains('list-line')) {
+          // Only prepend the bullet prefix when the whole line is selected.
+          // A partial selection (word or phrase within the line) should not
+          // carry the bullet when pasted into an external app.
+          let partial = false;
+          if (isFirst && lineEl.contains(range.startContainer)) {
+            try {
+              const tr = document.createRange();
+              tr.setStart(lineEl, 0);
+              tr.setEnd(range.startContainer, range.startOffset);
+              if (tr.toString() !== '') partial = true;
+            } catch (_) {}
+          }
+          if (!partial && isLast && lineEl.contains(range.endContainer)) {
+            try {
+              const tr = document.createRange();
+              tr.setStart(range.endContainer, range.endOffset);
+              tr.setEnd(lineEl, lineEl.childNodes.length);
+              if (tr.toString() !== '') partial = true;
+            } catch (_) {}
+          }
+          if (!partial) return '  '.repeat(getLevel(lineEl)) + '- ' + text;
+        }
+        return text;
+      }).join('\n'));
+    });
+
+    // ── Mobile toolbar ────────────────────────────────────────────────────────
+    // Declared as function statements so they are hoisted and available when
+    // jotShowWelcome() calls jotToolbarHide() during page init.
+    function jotToolbarHide() {
+      const t = document.getElementById('jot-toolbar');
+      if (t) { t.style.visibility = 'hidden'; t.style.top = ''; }
+      editor.style.paddingTop = '';
+    }
+
+    function jotToolbarPin() {
+      // iOS Safari does not reliably keep position:fixed elements pinned during
+      // momentum scroll. Explicitly writing top from the visualViewport offset
+      // (which is 0 during normal scroll, non-zero only when keyboard+pan) on
+      // every viewport event forces the compositor to treat this as fixed.
+      const t = document.getElementById('jot-toolbar');
+      if (!t || t.style.visibility === 'hidden') return;
+      const vv = window.visualViewport;
+      t.style.top = (vv ? vv.offsetTop : 0) + 'px';
+    }
+
+    function jotToolbarShow() {
+      // Never run on desktop — prevents padding being applied to the editor there.
+      if (!window.matchMedia('(pointer: coarse)').matches) return;
+      if (document.getElementById('jot-welcome')) return;
+      const t = document.getElementById('jot-toolbar');
+      if (!t) return;
+      jotToolbarPin();
+      t.style.visibility = 'visible';
+      // Push editor content below the pill so the first line isn't hidden.
+      // Read the actual rendered height so this stays correct if CSS changes.
+      requestAnimationFrame(() => {
+        editor.style.paddingTop = (t.offsetHeight + 8) + 'px';
+      });
+    }
+
+    (function () {
+      const toolbar = document.getElementById('jot-toolbar');
+      if (!toolbar) return;
+      const inner = document.getElementById('jot-toolbar-inner');
+
+      // visualViewport.offsetTop is 0 during normal scroll (it only changes
+      // when keyboard is open and the user pans). Listening here forces iOS to
+      // keep the element pinned; without it, position:fixed can drift during
+      // momentum scroll on iOS Safari.
+      if (window.visualViewport) {
+        window.visualViewport.addEventListener('scroll', jotToolbarPin);
+        window.visualViewport.addEventListener('resize', jotToolbarPin);
+      }
+
+      // Prevent focus/selection loss on any tap inside the pill — including the
+      // dark background gaps between buttons, not just the buttons themselves.
+      [inner, ...toolbar.querySelectorAll('button')].forEach(el =>
+        el.addEventListener('pointerdown', e => e.preventDefault())
+      );
+
+      document.getElementById('jtb-undo').addEventListener('click', () => _doUndo());
+      document.getElementById('jtb-redo').addEventListener('click', () => _doRedo());
+      document.getElementById('jtb-tab').addEventListener('click', () => doTab(false));
+      document.getElementById('jtb-stab').addEventListener('click', () => doTab(true));
+      document.getElementById('jtb-bold').addEventListener('click', () => {
+        jotUndoSnap(); jotAllowFormat = true; document.execCommand('bold'); jotAllowFormat = false;
+      });
+      document.getElementById('jtb-italic').addEventListener('click', () => {
+        jotUndoSnap(); jotAllowFormat = true; document.execCommand('italic'); jotAllowFormat = false;
+      });
+      document.getElementById('jtb-underline').addEventListener('click', () => {
+        jotUndoSnap(); jotAllowFormat = true; doUnderline(); jotAllowFormat = false;
+      });
+      // Show toolbar when editor is focused (e.g. returning from welcome screen).
+      // No blur handler — toolbar stays visible for the lifetime of a document.
+      editor.addEventListener('focus', jotToolbarShow);
+    })();
+
+    // Suppress the browser's own paragraph insertion only when our keydown
+    // handler already handled Enter (_jotEnterHandled = true). If the flag is
+    // false it means our handler silently failed (e.g. getLineEl returned null)
+    // — in that case we do NOT prevent the event so the browser falls back to
+    // its native paragraph insertion (a <div> thanks to defaultParagraphSeparator)
+    // rather than silently swallowing the keystroke. Chrome, Safari, and Firefox
+    // all benefit from this guard.
+    // ── Swipe gestures (mobile / tablet only) ────────────────────────────────
+    // Left-edge swipe right  →  back to start screen (like browser back)
+    // Swipe right            →  Tab   (indent list item)
+    // Swipe left             →  Shift+Tab  (unindent list item)
+    // Gated to touch devices; passive listeners so scroll is never blocked.
+    if (window.matchMedia('(pointer: coarse)').matches) {
+      let _swipeX = 0, _swipeY = 0, _swipeT = 0;
+
+      editor.addEventListener('touchstart', e => {
+        if (e.touches.length !== 1) { _swipeX = 0; return; }
+        _swipeX = e.touches[0].clientX;
+        _swipeY = e.touches[0].clientY;
+        _swipeT = Date.now();
+      }, { passive: true });
+
+      editor.addEventListener('touchend', e => {
+        if (!_swipeX || e.changedTouches.length !== 1) return;
+        const dx = e.changedTouches[0].clientX - _swipeX;
+        const dy = e.changedTouches[0].clientY - _swipeY;
+        const dt = Date.now() - _swipeT;
+        const startX = _swipeX;
+        _swipeX = 0; // reset so a multi-touch release doesn't re-trigger
+        // Must be: clearly horizontal (|dx| > 1.5×|dy|), at least 60 px,
+        // and quick (< 400 ms) to distinguish from a slow selection drag.
+        if (Math.abs(dx) < 60 || Math.abs(dx) <= Math.abs(dy) * 1.5 || dt >= 400) return;
+        // Left-edge back gesture: started within 25 px of screen left and
+        // swiped right → treat as "back" (same as Escape / doEscape).
+        if (dx > 0 && startX < 60) { doEscape(); return; }
+        if (dx > 0) doTab(false); // right → indent
+        else        doTab(true);  // left  → unindent
+      }, { passive: true });
+    }
+
+    editor.addEventListener('beforeinput', (e) => {
+      // iOS/Android system undo/redo gestures (three-finger swipe, shake, etc.)
+      // fire historyUndo / historyRedo beforeinput events. Intercept them so our
+      // custom stack handles the undo rather than the browser's native stack,
+      // which doesn't know about our DOM operations.
+      // iOS fires one event per native undo *unit* (word / character), so a single
+      // gesture can dispatch many events in rapid succession. Debounce to 80 ms so
+      // the entire burst counts as one step in our custom stack.
+      if (e.inputType === 'historyUndo') {
+        // During ZWS replenishment, execCommand('undo') may fire this event
+        // programmatically. Let it pass so the browser natively undoes the ZWS
+        // insertion (restoring state.html) without touching our custom stack.
+        if (_undoApplying) return;
+        e.preventDefault();
+        clearTimeout(_historyGestureTimer);
+        _historyGestureTimer = setTimeout(() => { _historyGestureTimer = null; _doUndo(); }, 80);
+        return;
+      } else if (e.inputType === 'historyRedo') {
+        if (_undoApplying) return;
+        e.preventDefault();
+        clearTimeout(_historyGestureTimer);
+        _historyGestureTimer = setTimeout(() => { _historyGestureTimer = null; _doRedo(); }, 80);
+        return;
+      } else if (e.inputType === 'insertParagraph') {
+        if (_jotEnterHandled) e.preventDefault();
+        _jotEnterHandled = false; // reset for next keystroke
+      } else if (e.inputType === 'insertLineBreak') {
+        const lineEl = getLineEl();
+        if (lineEl && lineEl.classList.contains('list-line')) e.preventDefault();
+      } else if (e.inputType === 'insertText' && (e.data === '-' || e.data === '>' || e.data === '+')) {
+        // Android keyboards fire beforeinput with insertText instead of keydown
+        // with the correct e.key. Catch list-creation chars here so they work on
+        // Android without affecting desktop (keydown already handled those there).
+        const lineEl = getLineEl();
+        if (lineEl && isAtStart(lineEl)) {
+          e.preventDefault();
+          jotUndoSnap();
+          const isList = lineEl.classList.contains('list-line');
+          if (!isList) { lineEl.classList.add('list-line'); setLevel(lineEl, 0); }
+          if (e.data === '>') lineEl.dataset.bullet = 'arrow';
+          else if (e.data === '+') lineEl.dataset.bullet = 'plus';
+          else lineEl.removeAttribute('data-bullet');
+        }
+      }
+    });
+
+
+  </script>
+</body>
+</html>
