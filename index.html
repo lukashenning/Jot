@@ -5,9 +5,9 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Jot</title>
   <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><circle cx='50' cy='50' r='50' fill='%23FFC800'/></svg>">
-  <link rel="icon" type="image/png" href="https://raw.githubusercontent.com/puppenkistenlukas/Jot/main/iconimage_v7.png">
-  <link rel="apple-touch-icon" href="https://raw.githubusercontent.com/puppenkistenlukas/Jot/main/iconimage_v7.png">
-  <link rel="manifest" href="data:application/manifest+json,{&quot;name&quot;:&quot;Jot&quot;,&quot;icons&quot;:[{&quot;src&quot;:&quot;https://raw.githubusercontent.com/puppenkistenlukas/Jot/main/iconimage_v7.png&quot;,&quot;sizes&quot;:&quot;any&quot;,&quot;type&quot;:&quot;image/png&quot;}],&quot;display&quot;:&quot;standalone&quot;}">
+  <link rel="icon" type="image/png" href="https://raw.githubusercontent.com/lukashenning/Jot/main/icon.png">
+  <link rel="apple-touch-icon" href="https://raw.githubusercontent.com/lukashenning/Jot/main/icon.png">
+  <link rel="manifest" href="data:application/manifest+json,{&quot;name&quot;:&quot;Jot&quot;,&quot;icons&quot;:[{&quot;src&quot;:&quot;https://raw.githubusercontent.com/lukashenning/Jot/main/icon.png&quot;,&quot;sizes&quot;:&quot;any&quot;,&quot;type&quot;:&quot;image/png&quot;}],&quot;display&quot;:&quot;standalone&quot;}">
   <style>
     ::selection {
       background: rgba(0, 0, 0, 0.3);
@@ -207,7 +207,7 @@
     <div><br></div>
     <div class="list-line" style="--level: 0;">You can <b>bold</b> text, <i>italicize</i> or <u>underline</u> to highlight it.<br></div>
     <div><br></div>
-    <div class="list-line" style="--level: 0;">Select text and paste an URL to create a <a href="https://github.com/puppenkistenlukas/Jot" target="_blank" rel="noopener noreferrer">hyperlink</a>.  </div>
+    <div class="list-line" style="--level: 0;">Select text and paste an URL to create a <a href="https://github.com/lukashenning/Jot" target="_blank" rel="noopener noreferrer">hyperlink</a>.  </div>
     <div><br></div>
     <div class="list-line" style="--level: 0;">Type <u>-</u>, <u>+</u> or <u>&gt;</u> at the very beginning of a line to create a list item or change its bullet style.</div>
     <div class="list-line" style="--level: 1;" data-bullet="plus">Swipe right or press <u>Tab</u> to increase a list item's indentation level.</div>
@@ -262,7 +262,7 @@
       tmp.insertNode(marker);
       const r = marker.getBoundingClientRect();
       marker.remove();
-      return r.height > 0 ? { left: r.left, top: r.top, height: r.height } : null;
+      return r.height > 0 ? { left: r.left, top: r.top, bottom: r.bottom, height: r.height } : null;
     }
 
     function updateCursor() {
@@ -385,21 +385,17 @@
     }
 
     function jotScrollToCursor() {
-      // Use the line element's rect rather than the collapsed range's rect:
-      // a collapsed range before a <br> in a freshly-inserted empty div returns
-      // a zero-height, zero-width rect in all major browsers, which makes it
-      // impossible to compute the real scroll offset needed.
-      const lineEl = getLineEl();
-      if (!lineEl) return;
-      const rect = lineEl.getBoundingClientRect();
+      const rect = getCaretRect();
+      if (!rect) return;
       const vvh = window.visualViewport ? window.visualViewport.height : window.innerHeight;
-      // Pad by 1.5 line-heights so the cursor never sits flush against the
-      // bottom edge (or the top of an on-screen keyboard on mobile).
-      const margin = (rect.height || 20) * 1.5;
-      if (rect.bottom > vvh - margin) {
-        window.scrollBy(0, rect.bottom - (vvh - margin));
+      const lineH = rect.height || 20;
+      // Scroll if the cursor is within 2 line-heights of the bottom edge (or
+      // below it), bringing it to exactly 2 line-heights above the bottom.
+      // Also scroll up if the cursor is above the top of the viewport.
+      if (rect.bottom > vvh - lineH * 2) {
+        window.scrollBy(0, rect.bottom - (vvh - lineH * 2));
       } else if (rect.top < 0) {
-        window.scrollBy(0, rect.top - margin);
+        window.scrollBy(0, rect.top);
       }
     }
 
