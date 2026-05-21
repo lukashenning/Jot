@@ -1690,6 +1690,13 @@
 
       editor.addEventListener('touchstart', e => {
         if (e.touches.length !== 1) { _swipeX = 0; return; }
+        // If the user already has text selected (non-collapsed), they may be
+        // dragging a selection handle rather than swiping to indent/escape.
+        // Don't arm swipe detection in that case — otherwise a quick drag of
+        // the handle looks like a rightward swipe and fires doTab(), replacing
+        // the selected text with spaces (making it appear "invisible").
+        const _ss = window.getSelection();
+        if (_ss && !_ss.isCollapsed) { _swipeX = 0; return; }
         _swipeX = e.touches[0].clientX;
         _swipeY = e.touches[0].clientY;
         _swipeT = Date.now();
