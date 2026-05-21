@@ -17,6 +17,12 @@
       min-width: 250px;
       min-height: 250px;
     }
+    body {
+      /* Remove the browser's default 8px body margin so the editor's explicit
+         padding values are the sole source of inset — without this the margin
+         stacks on top of padding and makes the gap wider than intended. */
+      margin: 0;
+    }
     ::selection {
       background: rgba(0, 0, 0, 0.3);
       color: inherit;
