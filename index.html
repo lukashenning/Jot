@@ -9,9 +9,6 @@
   <link rel="apple-touch-icon" href="https://raw.githubusercontent.com/lukashenning/Jot/main/icon.png">
   <link rel="manifest" href="data:application/manifest+json,{&quot;name&quot;:&quot;Jot&quot;,&quot;icons&quot;:[{&quot;src&quot;:&quot;https://raw.githubusercontent.com/lukashenning/Jot/main/icon.png&quot;,&quot;sizes&quot;:&quot;any&quot;,&quot;type&quot;:&quot;image/png&quot;}],&quot;display&quot;:&quot;standalone&quot;}">
   <style>
-    html, body {
-      margin: 0;
-    }
     html {
       /* Lets Chrome/Safari standalone web-app windows be resized this small.
          Regular browser windows have their own OS-level minimum (~500 px on
@@ -95,9 +92,8 @@
     .jot-clear { cursor: pointer; }
     .jot-clear:hover { background: rgba(0,0,0,0.07); }
     #jot-welcome u { text-decoration: none; background: rgba(255, 200, 0, 0.3); }
-    @media (max-width: 600px), (pointer: coarse) {
+    @media (max-width: 600px) {
       #editor, #jot-welcome { padding: 1rem; }
-      #editor { padding-left: 16px; padding-right: 16px; }
     }
     /* Hide the editor and its cursor whenever any welcome/recovery/confirm
        overlay is present — prevents the document from bleeding through. */
