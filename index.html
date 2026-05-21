@@ -92,7 +92,7 @@
     .jot-clear { cursor: pointer; }
     .jot-clear:hover { background: rgba(0,0,0,0.07); }
     #jot-welcome u { text-decoration: none; background: rgba(255, 200, 0, 0.3); }
-    @media (max-width: 600px) {
+    @media (max-width: 600px), (pointer: coarse) {
       #editor, #jot-welcome { padding: 1rem; }
     }
     /* Hide the editor and its cursor whenever any welcome/recovery/confirm
@@ -397,11 +397,11 @@
       if (!rect) return;
       const vvh = window.visualViewport ? window.visualViewport.height : window.innerHeight;
       const lineH = rect.height || 20;
-      // Scroll if the cursor is within 2 line-heights of the bottom edge (or
-      // below it), bringing it to exactly 2 line-heights above the bottom.
-      // Also scroll up if the cursor is above the top of the viewport.
-      if (rect.bottom > vvh - lineH * 2) {
-        window.scrollBy(0, rect.bottom - (vvh - lineH * 2));
+      // On touch devices one line-height of clearance is enough (the on-screen
+      // keyboard already provides visual separation); on desktop keep two.
+      const clearance = window.matchMedia('(pointer: coarse)').matches ? lineH : lineH * 2;
+      if (rect.bottom > vvh - clearance) {
+        window.scrollBy(0, rect.bottom - (vvh - clearance));
       } else if (rect.top < 0) {
         window.scrollBy(0, rect.top);
       }
@@ -1180,6 +1180,10 @@
         } else if (e.key === 'Backspace' && !w.dataset.screen) {
           e.preventDefault();
           jotShowClearConfirm();
+        } else if ((e.metaKey || e.ctrlKey) && e.key === 'v' && !w.dataset.screen) {
+          // Paste while on the start screen → open a fresh jot first, then let
+          // the browser's paste event fire naturally on the now-ready editor.
+          jotStartNew();
         } else if (e.key !== 'Escape' && !e.metaKey && !e.ctrlKey && !e.altKey && !w.dataset.screen) {
           w.remove();
           jotCurrentId = null;
