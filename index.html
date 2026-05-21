@@ -69,6 +69,9 @@
       display: inline-block;
       width: 3ch;
       margin-left: -3ch;
+      /* Declare explicitly so Safari doesn't fall back to a different font
+         for bullet characters that aren't in its SF Mono glyph cache. */
+      font-family: 'SF Mono', Menlo, Monaco, 'Courier New', monospace;
     }
     .list-line[data-bullet="arrow"]::before {
       content: "\00a0\2192 ";
@@ -704,6 +707,29 @@
       }
 
       if ((e.metaKey || e.ctrlKey) && e.key === 's') {
+        // Safari web-app (added to Dock): no browser chrome means Cmd+S never
+        // reaches the native "Save Page As" dialog. Intercept it here and
+        // trigger a programmatic download of the serialised document instead.
+        const _safariStandalone =
+          /^((?!chrome|android).)*safari/i.test(navigator.userAgent) &&
+          (navigator.standalone === true ||
+           window.matchMedia('(display-mode: standalone)').matches);
+        if (_safariStandalone) {
+          e.preventDefault();
+          const _first = jotFirstLine();
+          const _fname = (_first ? _first.replace(/\s+/g, '_') : 'jot') + '.html';
+          const _html  = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
+          const _blob  = new Blob([_html], { type: 'text/html' });
+          const _url   = URL.createObjectURL(_blob);
+          const _a     = document.createElement('a');
+          _a.href     = _url;
+          _a.download = _fname;
+          document.body.appendChild(_a);
+          _a.click();
+          document.body.removeChild(_a);
+          setTimeout(() => URL.revokeObjectURL(_url), 1000);
+          return;
+        }
         if (jotExported) {
           // Exported file: set title to the HTML filename right now so the
           // browser's "Save Page As" dialog sees it immediately. The title was
