@@ -14,11 +14,7 @@ Jot is a lightweight text editor that lives in a single HTML file. It offers sim
 
 Type Backspace or Enter at the very beginning of a list item to turn it into a regular line of text.
 
-Swipe or use Tab in regular (non-list) lines to create simple tables like so:
-Player    Score    Comment
-Lukas     19       Hello!
-Muriel    29       <3
-Bacon     07       (°œ°)
+Swipe or use Tab in regular (non-list) lines to create simple tables.
 
 Every new jot is automatically backed up in your browser's local storage.
 - Swipe right from the left edge of the screen or press Escape to access an overview.
