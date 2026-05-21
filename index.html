@@ -927,7 +927,16 @@
     let jotFromRecovery = false; // true while a Recovery snapshot is open
 
     function jotFirstLine() {
-      return (editor.children[0] || { textContent: '' }).textContent.trim();
+      // Normally each line is a <div> child, so children[0] is the first line.
+      // But after a browser-native "select-all + delete" the editor can be left
+      // with a bare text node instead of a wrapped <div>. In that case
+      // children[0] is null and we'd return "" — causing jotShowWelcome to
+      // filter the entry out and delete it from localStorage even though the
+      // user has typed new content. Fall back to the full textContent so that
+      // any text in the editor, regardless of whether it's wrapped, is found.
+      const firstEl = editor.children[0];
+      if (firstEl) return firstEl.textContent.trim();
+      return editor.textContent.trim();
     }
 
     function jotSaveCurrent() {
