@@ -100,6 +100,12 @@
     .jot-new:hover { background: rgba(0,0,0,0.07); }
     .jot-clear { cursor: pointer; }
     .jot-clear:hover { background: rgba(0,0,0,0.07); }
+    /* While the user is navigating with arrow keys, suppress CSS :hover so the
+       mouse cursor position doesn't interfere with keyboard selection.
+       The :not() guard ensures that an entry which is *both* hovered and
+       keyboard-selected still shows its selection highlight.
+       Class is removed on the next mousemove event (see JS below). */
+    body.jot-kb-nav .jot-entry:hover:not(.jot-entry-selected) { background: none; }
     #jot-welcome u { text-decoration: none; background: rgba(255, 200, 0, 0.3); }
     @media (max-width: 600px), (pointer: coarse) {
       #editor, #jot-welcome { padding: 1rem; }
@@ -1038,7 +1044,7 @@
         html += '<div class="jot-clear">Reset (Backspace)</div>';
       }
 
-      html += '<div><br></div><div><u>v0.21.5a</u></div><div><u>Lukas Henning 21/05/2026</u></div><div><br></div>';
+      html += '<div><br></div><div><u>v8</u></div><div><u>Lukas Henning 19/05/2026</u></div><div><br></div>';
       w.innerHTML = html;
       document.body.appendChild(w);
       w.scrollTop = 0;
@@ -1204,15 +1210,26 @@
         const selEl = w.querySelector('.jot-entry-selected');
         const selIdx = selEl ? entryEls.indexOf(selEl) : -1;
 
-        if (e.key === 'ArrowDown') {
+        if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
           e.preventDefault();
+          // If no keyboard selection is active yet, treat the currently hovered
+          // entry (if any) as the starting position — so the user can switch
+          // from mouse to keyboard without the focus jumping to the top.
+          let curIdx = selIdx;
+          if (curIdx === -1) {
+            const hov = w.querySelector('.jot-entry:hover');
+            if (hov) curIdx = entryEls.indexOf(hov);
+          }
           if (selEl) selEl.classList.remove('jot-entry-selected');
-          const next = entryEls[Math.min(selIdx + 1, entryEls.length - 1)];
-          if (next) next.classList.add('jot-entry-selected');
-        } else if (e.key === 'ArrowUp') {
-          e.preventDefault();
-          if (selEl) selEl.classList.remove('jot-entry-selected');
-          if (selIdx > 0) entryEls[selIdx - 1].classList.add('jot-entry-selected');
+          let nextIdx;
+          if (e.key === 'ArrowDown') {
+            nextIdx = Math.min(curIdx + 1, entryEls.length - 1);
+          } else {
+            // ArrowUp: if already at top (or nothing yet) stay at 0
+            nextIdx = curIdx > 0 ? curIdx - 1 : Math.max(curIdx, 0);
+          }
+          if (entryEls[nextIdx]) entryEls[nextIdx].classList.add('jot-entry-selected');
+          document.body.classList.add('jot-kb-nav'); // suppress hover visuals
         } else if ((e.key === 'Enter' || e.key === ' ') && selEl) {
           e.preventDefault();
           selEl.click();
@@ -1253,6 +1270,16 @@
         doEscape();
       }
     });
+
+    // When the mouse moves after keyboard navigation: exit keyboard mode and
+    // clear the keyboard selection so hover takes over visually with no overlap.
+    document.addEventListener('mousemove', () => {
+      if (!document.body.classList.contains('jot-kb-nav')) return;
+      document.body.classList.remove('jot-kb-nav');
+      const w = document.getElementById('jot-welcome');
+      if (w) w.querySelectorAll('.jot-entry-selected')
+               .forEach(el => el.classList.remove('jot-entry-selected'));
+    }, { passive: true });
 
     // Auto-save
     let jotTimer = null;
@@ -1727,6 +1754,31 @@
     // Swipe right            →  Tab   (indent list item)
     // Swipe left             →  Shift+Tab  (unindent list item)
     // Gated to touch devices; passive listeners so scroll is never blocked.
+    // Save the current jot as an HTML file from a touch device.
+    // On iOS/iPadOS: open the native share sheet (Files, AirDrop, Messages…)
+    //   via the Web Share API with the file attached.
+    // On other touch devices (Android, etc.): trigger a direct download.
+    function _jotMobileSave() {
+      const fname = (jotFirstLine().replace(/\s+/g, '_') || 'jot') + '.html';
+      const html  = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
+      const blob  = new Blob([html], { type: 'text/html' });
+      const file  = new File([blob], fname, { type: 'text/html' });
+      // iOS/iPadOS: navigator.canShare({files:[…]}) is true; opens share sheet.
+      if (navigator.share && navigator.canShare && navigator.canShare({ files: [file] })) {
+        navigator.share({ files: [file], title: fname }).catch(() => {});
+        return;
+      }
+      // Other platforms: trigger a download (same mechanism as Cmd+S on desktop).
+      const url = URL.createObjectURL(blob);
+      const a   = document.createElement('a');
+      a.href     = url;
+      a.download = fname;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    }
+
     if (window.matchMedia('(pointer: coarse)').matches) {
       let _swipeX = 0, _swipeY = 0, _swipeT = 0;
 
@@ -1754,9 +1806,12 @@
         // Must be: clearly horizontal (|dx| > 1.5×|dy|), at least 60 px,
         // and quick (< 400 ms) to distinguish from a slow selection drag.
         if (Math.abs(dx) < 60 || Math.abs(dx) <= Math.abs(dy) * 1.5 || dt >= 400) return;
-        // Left-edge back gesture: started within 25 px of screen left and
-        // swiped right → treat as "back" (same as Escape / doEscape).
+        // Left-edge back gesture: started within 60 px of screen left, swiped
+        // right → back to start screen (mirrors browser back).
         if (dx > 0 && startX < 60) { doEscape(); return; }
+        // Right-edge save gesture: started within 60 px of screen right, swiped
+        // left → save the jot (mirrors the left-edge back gesture).
+        if (dx < 0 && startX > window.innerWidth - 60) { _jotMobileSave(); return; }
         if (dx > 0) doTab(false); // right → indent
         else        doTab(true);  // left  → unindent
       }, { passive: true });
