@@ -326,8 +326,12 @@
       blockCursor.style.height = rect.height + 'px';
     }
 
-    function loop() {
-      updateCursor();
+    let _lastCursorTs = 0;
+    function loop(ts) {
+      if (ts - _lastCursorTs >= 100) { // ~10 fps — reduces forced-reflow cost 6×
+        _lastCursorTs = ts;
+        updateCursor();
+      }
       requestAnimationFrame(loop);
     }
     requestAnimationFrame(loop);
