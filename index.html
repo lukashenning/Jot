@@ -337,9 +337,11 @@
       requestAnimationFrame(loop);
     }
     requestAnimationFrame(loop);
-    // Mark cursor dirty on every key so the position updates on the very next
-    // frame after a keystroke rather than waiting up to 100 ms.
+    // Mark cursor dirty so the position updates on the very next frame rather
+    // than waiting up to 100 ms. keydown covers hardware keyboards and arrow
+    // keys; input covers iOS virtual keyboard, autocorrect, predictive text.
     editor.addEventListener('keydown', () => { _cursorDirty = true; }, { passive: true });
+    editor.addEventListener('input',   () => { _cursorDirty = true; }, { passive: true });
     editor.focus();
 
     function getLineEl() {
