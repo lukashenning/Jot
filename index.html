@@ -757,12 +757,26 @@
            window.matchMedia('(display-mode: standalone)').matches);
         if (_safariStandalone) {
           // Safari PWA has no browser chrome so the native Cmd+S dialog is
-          // unavailable. showSaveFilePicker() is not supported in Safari, so
-          // the best we can do is the native share sheet, which lets the user
-          // pick a destination and rename the file. On older Safari that
-          // doesn't support file sharing, fall back to a direct download.
+          // unavailable. On iOS/iPadOS the share sheet is rich (includes
+          // "Save to Files"), so delegate to _jotMobileSave() there. On macOS
+          // the share sheet only offers AirDrop/Messages/Copy, so fall back to
+          // a direct download to the Downloads folder instead.
           e.preventDefault();
-          _jotMobileSave();
+          const _isiOS = /iPhone|iPad|iPod/.test(navigator.userAgent) ||
+                         (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+          if (_isiOS) { _jotMobileSave(); return; }
+          const _first = jotFirstLine();
+          const _fname = (_first ? _first.replace(/\s+/g, '_') : 'jot') + '.html';
+          const _html  = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
+          const _blob  = new Blob([_html], { type: 'text/html' });
+          const _url   = URL.createObjectURL(_blob);
+          const _a     = document.createElement('a');
+          _a.href     = _url;
+          _a.download = _fname;
+          document.body.appendChild(_a);
+          _a.click();
+          document.body.removeChild(_a);
+          setTimeout(() => URL.revokeObjectURL(_url), 1000);
           return;
         }
         if (jotExported) {
