@@ -327,14 +327,19 @@
     }
 
     let _lastCursorTs = 0;
+    let _cursorDirty  = false; // set on keydown so typing feels instant
     function loop(ts) {
-      if (ts - _lastCursorTs >= 100) { // ~10 fps — reduces forced-reflow cost 6×
+      if (_cursorDirty || ts - _lastCursorTs >= 100) { // instant on input, ~10 fps idle
         _lastCursorTs = ts;
+        _cursorDirty  = false;
         updateCursor();
       }
       requestAnimationFrame(loop);
     }
     requestAnimationFrame(loop);
+    // Mark cursor dirty on every key so the position updates on the very next
+    // frame after a keystroke rather than waiting up to 100 ms.
+    editor.addEventListener('keydown', () => { _cursorDirty = true; }, { passive: true });
     editor.focus();
 
     function getLineEl() {
