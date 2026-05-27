@@ -758,9 +758,9 @@
         if (_safariStandalone) {
           // Safari PWA has no browser chrome so the native Cmd+S dialog is
           // unavailable. showSaveFilePicker() is not supported in Safari, so
-          // the best we can do is the native macOS/iOS share sheet, which lets
-          // the user pick a destination and rename the file. On older Safari
-          // that doesn't support file sharing, fall back to a direct download.
+          // the best we can do is the native share sheet, which lets the user
+          // pick a destination and rename the file. On older Safari that
+          // doesn't support file sharing, fall back to a direct download.
           e.preventDefault();
           _jotMobileSave();
           return;
