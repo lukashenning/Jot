@@ -36,7 +36,7 @@
       min-height: 100vh;
       padding: 2rem;
       box-sizing: border-box;
-      font-family: 'SF Mono', monospace;
+      font-family: ui-monospace, 'SF Mono', monospace;
       caret-color: transparent;
       outline: none;
       overflow-wrap: break-word;
@@ -48,7 +48,7 @@
     #block-cursor {
       position: fixed;
       width: 1ch;
-      font-family: 'SF Mono', monospace;
+      font-family: ui-monospace, 'SF Mono', monospace;
       background: rgba(0, 0, 0, 0.3);
       pointer-events: none;
       display: none;
@@ -73,9 +73,9 @@
       display: inline-block;
       width: 3ch;
       margin-left: -3ch;
-      /* Declare explicitly so Safari doesn't fall back to a different font
-         for bullet characters that aren't in its SF Mono glyph cache. */
-      font-family: 'SF Mono', Menlo, Monaco, 'Courier New', monospace;
+      /* ui-monospace resolves to SF Mono on Apple platforms, bypassing Safari's
+         restriction on accessing SF Mono by name from web content. */
+      font-family: ui-monospace, 'SF Mono', Menlo, Monaco, 'Courier New', monospace;
     }
     .list-line[data-bullet="arrow"]::before {
       content: "\00a0\2192 ";
@@ -99,7 +99,7 @@
       inset: 0;
       padding: 2rem;
       box-sizing: border-box;
-      font-family: 'SF Mono', monospace;
+      font-family: ui-monospace, 'SF Mono', monospace;
       background: white;
       overflow-y: auto;
       z-index: 100;
@@ -171,7 +171,7 @@
       background: none;
       border: none;
       color: rgba(255,255,255,0.9);
-      font-family: 'SF Mono', monospace;
+      font-family: ui-monospace, 'SF Mono', monospace;
       font-size: 1rem;
       line-height: 1;
       padding: 4px 10px;
@@ -756,19 +756,13 @@
           (navigator.standalone === true ||
            window.matchMedia('(display-mode: standalone)').matches);
         if (_safariStandalone) {
+          // Safari PWA has no browser chrome so the native Cmd+S dialog is
+          // unavailable. showSaveFilePicker() is not supported in Safari, so
+          // the best we can do is the native macOS/iOS share sheet, which lets
+          // the user pick a destination and rename the file. On older Safari
+          // that doesn't support file sharing, fall back to a direct download.
           e.preventDefault();
-          const _first = jotFirstLine();
-          const _fname = (_first ? _first.replace(/\s+/g, '_') : 'jot') + '.html';
-          const _html  = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
-          const _blob  = new Blob([_html], { type: 'text/html' });
-          const _url   = URL.createObjectURL(_blob);
-          const _a     = document.createElement('a');
-          _a.href     = _url;
-          _a.download = _fname;
-          document.body.appendChild(_a);
-          _a.click();
-          document.body.removeChild(_a);
-          setTimeout(() => URL.revokeObjectURL(_url), 1000);
+          _jotMobileSave();
           return;
         }
         if (jotExported) {
