@@ -8,6 +8,14 @@
   <link rel="icon" type="image/png" href="https://raw.githubusercontent.com/lukashenning/Jot/main/icon.png">
   <link rel="apple-touch-icon" href="https://raw.githubusercontent.com/lukashenning/Jot/main/icon.png">
   <link rel="manifest" href="data:application/manifest+json,{&quot;name&quot;:&quot;Jot&quot;,&quot;icons&quot;:[{&quot;src&quot;:&quot;https://raw.githubusercontent.com/lukashenning/Jot/main/icon.png&quot;,&quot;sizes&quot;:&quot;any&quot;,&quot;type&quot;:&quot;image/png&quot;}],&quot;display&quot;:&quot;standalone&quot;}">
+  <script>
+    // Register the service worker so the app works offline after the first visit.
+    // Silently ignored on file:// URLs (SW requires HTTPS) and in browsers that
+    // don't support the API.
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('./sw.js').catch(() => {});
+    }
+  </script>
   <style>
     html {
       /* Lets Chrome/Safari standalone web-app windows be resized this small.
@@ -1179,7 +1187,7 @@
         '<div><br></div>',
         '<div class="jot-entry list-line" style="--level: 0;" data-bullet="arrow" data-export-action="continue"><b>Continue</b> where I left off.</div>',
         '<div><br></div>',
-        '<div class="jot-entry list-line" style="--level: 0;" data-bullet="arrow" data-export-action="revert"><b>Revert</b> to original state.<br>(<i>Changes are lost!</i>)</div>',
+        '<div class="jot-entry list-line" style="--level: 0;" data-bullet="arrow" data-export-action="revert"><b>Revert</b> to original state.<br>(<i>...and lose all changes!</i>)</div>',
       ].join('');
 
       document.body.appendChild(w);
