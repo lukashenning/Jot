@@ -1024,8 +1024,13 @@
       // filter the entry out and delete it from localStorage even though the
       // user has typed new content. Fall back to the full textContent so that
       // any text in the editor, regardless of whether it's wrapped, is found.
-      const firstEl = editor.children[0];
-      if (firstEl) return firstEl.textContent.trim();
+      // Walk all child elements to find the first line that has actual content,
+      // so documents that start with one or more blank lines still show a title.
+      for (const el of editor.children) {
+        const t = el.textContent.trim();
+        if (t) return t;
+      }
+      // Bare text node fallback (browser-native select-all + delete edge case).
       return editor.textContent.trim();
     }
 
@@ -1054,8 +1059,9 @@
       return `${p(d.getDate())}/${p(d.getMonth()+1)}/${d.getFullYear()} ${p(d.getHours())}:${p(d.getMinutes())}`;
     }
 
-    function jotEsc(t) {
-      return t.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    function jotEsc(t, maxLen = 56) {
+      const s = t.length > maxLen ? t.slice(0, maxLen) + '…' : t;
+      return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
     }
 
     function jotOpenEntry(entry) {
