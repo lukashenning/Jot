@@ -130,6 +130,35 @@
        overlay is present — prevents the document from bleeding through. */
     body:has(#jot-welcome) #editor,
     body:has(#jot-welcome) #block-cursor { visibility: hidden; }
+    #jot-hint {
+      position: fixed;
+      /* Default position matches editor padding — overridden by JS when caret
+         rect is available (i.e. editor is focused). */
+      top: 2rem;
+      left: 2rem;
+      color: #bbb;
+      font-family: ui-monospace, 'SF Mono', monospace;
+      pointer-events: none;
+      display: none;
+      white-space: nowrap;
+      user-select: none;
+      -webkit-user-select: none;
+    }
+    #jot-hint::before {
+      content: "Press Escape to go back";
+    }
+    @media (pointer: coarse) {
+      #jot-hint {
+        top: 1rem;
+        left: 16px;
+      }
+      #jot-hint::before {
+        content: "Swipe from the left edge to go back";
+      }
+    }
+    @media (prefers-color-scheme: dark) {
+      #jot-hint { color: #444; }
+    }
     .jot-img {
       max-height: 50vh;
       max-width: 50vw;
@@ -223,6 +252,7 @@
 <body>
   <div id="editor" contenteditable="true" spellcheck="false"><div><br></div></div>
   <div id="block-cursor"></div>
+  <div id="jot-hint"></div>
   <div id="jot-toolbar">
     <div id="jot-toolbar-inner">
       <button id="jtb-undo">↺</button>
@@ -239,17 +269,17 @@
        and edits like any other Jot document. jotSeedFeatures() reads
        this template's innerHTML directly; no JS string escaping needed. -->
   <template id="jot-features-tpl">
-    <div><b>Jot Features</b></div>
+    <div><b>About Jot</b></div>
     <div><i>Jot is a lightweight text editor that lives in a single HTML file. It offers simple formatting, indented lists, continuously backs up your work in localStorage and exports itself into every document you save.</i></div>
     <div><br></div>
-    <div class="list-line" style="--level: 0;"><u>Save</u> any Jot document as HTML to export a local file. On mobile, <u>swipe left from the right edge of the screen </u> to export. You can continue work on the exported file, but it no longer backs up automatically.</div>
+    <div class="list-line" style="--level: 0;"><u>Save</u> any jot as HTML to export a local file. On mobile, <u>swipe from the right edge</u> to export. Anyone can continue work on the exported file!</div>
     <div><br></div>
-    <div class="list-line" style="--level: 0;">You can <b>bold</b> text, <i>italicize</i> or <u>underline</u> to highlight it.<br></div>
+    <div class="list-line" style="--level: 0;">You can <b>bold</b> text, <i>italicize</i> or <u>underline</u> to highlight it.</div>
     <div><br></div>
-    <div class="list-line" style="--level: 0;">Select text and paste an URL to create a <a href="https://github.com/lukashenning/Jot" target="_blank" rel="noopener noreferrer">hyperlink</a>.  </div>
+    <div class="list-line" style="--level: 0;">Select text and paste an URL to create a <a href="https://github.com/lukashenning/Jot" target="_blank" rel="noopener noreferrer">hyperlink</a>.</div>
     <div><br></div>
-    <div class="list-line" style="--level: 0;">Type <u>-</u>, <u>+</u> or <u>&gt;</u> at the very beginning of a line to create a list item or change its bullet style.</div>
-    <div class="list-line" style="--level: 1;" data-bullet="plus">Swipe right or press <u>Tab</u> to increase a list item's indentation level.</div>
+    <div class="list-line" style="--level: 0;">Type <u>-</u>, <u>+</u>, <u>#</u> or <u>&gt;</u> at the very beginning of a line to create a list item or change its bullet style.</div>
+    <div class="list-line" style="--level: 1;" data-bullet="plus">Swipe right or press <u>Tab</u> to increase a list item's <b>indentation</b> level.</div>
     <div class="list-line" style="--level: 2;" data-bullet="arrow">Like so.</div>
     <div class="list-line" style="--level: 1;" data-bullet="plus">Swipe left or press <u>Shift+Tab</u> to decrease the indentation level.</div>
     <div><br></div>
@@ -262,15 +292,14 @@
     <div>Bacon&nbsp; &nbsp; &nbsp; &nbsp;07&nbsp; &nbsp; &nbsp; &nbsp; &nbsp; (°œ°)</div>
     <div><br></div>
     <div>Every new jot is automatically <b>backed up</b> in your browser's local storage.</div>
-    <div class="list-line" style="--level: 0;"><u>Swipe right from the left edge of the screen</u> or press <u>Escape</u> to access an <b>overview</b>.</div>
+    <div class="list-line" style="--level: 0;"><u>Swipe from the left edge</u> or press <u>Escape</u> to see all your jots.</div>
     <div class="list-line" style="--level: 1;" data-bullet="arrow"><i>Completely empty jots disappear from the list.</i></div>
     <div class="list-line" style="--level: 0;">Use <b>Reset</b> to clear all entries.</div>
     <div class="list-line" style="--level: 0;">Use <b>Recovery</b> to access snapshots of the ten last jots you re-opened, in case there's an accident.</div>
     <div><br></div>
-	 <div class="list-line" style="--level: 0;">To use Jot offline, simply download <u>Jot.html</u>.</div>
+    <div class="list-line" style="--level: 0;">To use Jot offline, simply open the jot overview and download <u>Jot.html</u>.</div>
     <div><br></div>
     <div><b><i>Pro tip:</i></b> <i>Try pasting images or web content into your jot 🪄</i></div>
-    <div><br></div>
     <div><br></div>
   </template>
 
@@ -789,6 +818,9 @@
           const _r = window.location.href.split('/').pop().split('?')[0].split('#')[0];
           const _n = decodeURIComponent(_r).replace(/\.html$/i, '').replace(/\s+/g, '_');
           if (_n) document.title = _n;
+          // Saving the file resolves unsaved changes — clear the draft so
+          // the next open doesn't show the recovery dialog.
+          localStorage.removeItem(JOT_EXPORT_DRAFT_KEY);
           // No reset: the exported file's tab should always show the filename.
         } else {
           // Live app: temporarily rename the tab to the first line of text so
@@ -956,6 +988,9 @@
     // ── Local storage ────────────────────────────────────────────────────────
     const JOT_KEY = 'jot_entries';
     const JOT_BACKUP_KEY = 'jot_backups';
+    // Per-exported-file draft key: unique to the file's URL so each exported
+    // .html gets its own unsaved-changes slot in localStorage.
+    const JOT_EXPORT_DRAFT_KEY = 'jot_export_draft_' + window.location.href;
 
     function jotLoad() {
       try { return JSON.parse(localStorage.getItem(JOT_KEY) || '[]'); } catch { return []; }
@@ -1119,9 +1154,54 @@
     function jotSeedFeatures() {
       const now = new Date().toISOString();
       const featHtml = document.getElementById('jot-features-tpl').innerHTML;
-      const entries = [{ id: now + '_features', html: featHtml, firstLine: 'Jot Features', createdAt: now, updatedAt: now }];
+      const entries = [{ id: now + '_features', html: featHtml, firstLine: 'About Jot', createdAt: now, updatedAt: now }];
       jotPersist(entries);
       return entries;
+    }
+
+    function jotShowExportRecovery(draft) {
+      const old = document.getElementById('jot-welcome');
+      if (old) old.remove();
+
+      const w = document.createElement('div');
+      w.id = 'jot-welcome';
+      w.dataset.screen = 'export-recovery';
+
+      w.innerHTML = [
+        '<div><b>Unsaved changes</b></div>',
+        '<div><i>This jot was closed before saving it.</i></div>',
+        '<div><br></div>',
+        '<div class="jot-entry list-line" style="--level: 0;" data-bullet="arrow" data-export-action="continue"><b>Continue</b> where I left off.</div>',
+        '<div><br></div>',
+        '<div class="jot-entry list-line" style="--level: 0;" data-bullet="arrow" data-export-action="revert"><b>Revert</b> to original state.<br>(<i>Changes are lost!</i>)</div>',
+      ].join('');
+
+      document.body.appendChild(w);
+      w.scrollTop = 0;
+
+      w.addEventListener('click', e => {
+        const entryEl = e.target.closest('.jot-entry[data-export-action]');
+        if (!entryEl) return;
+        w.remove();
+        if (entryEl.dataset.exportAction === 'continue') {
+          editor.innerHTML = draft;
+          jotUndoClear();
+          _undoStack.push({ html: editor.innerHTML, cur: 0 });
+        } else {
+          // Revert: delete draft — original file content is already in the editor.
+          localStorage.removeItem(JOT_EXPORT_DRAFT_KEY);
+        }
+        editor.focus();
+        const first = editor.firstChild;
+        if (first) {
+          const r = document.createRange();
+          r.setStart(first, 0);
+          r.collapse(true);
+          const sel = window.getSelection();
+          sel.removeAllRanges();
+          sel.addRange(r);
+        }
+      });
     }
 
     function jotShowClearConfirm() {
@@ -1245,6 +1325,10 @@
         const _raw = window.location.href.split('/').pop().split('?')[0].split('#')[0];
         const _fname = decodeURIComponent(_raw).replace(/\.html$/i, '').replace(/\s+/g, '_');
         if (_fname) document.title = _fname;
+        // If a draft exists the user made unsaved changes last session — offer
+        // to continue from that draft or revert to the saved file content.
+        const _draft = localStorage.getItem(JOT_EXPORT_DRAFT_KEY);
+        if (_draft) { jotShowExportRecovery(_draft); return; }
         editor.focus();
         return;
       }
@@ -1282,6 +1366,10 @@
         } else if ((e.key === 'Enter' || e.key === ' ') && selEl) {
           e.preventDefault();
           selEl.click();
+        } else if (e.key === 'Escape' && w.dataset.screen === 'export-recovery') {
+          // Escape on the export-recovery screen = safe choice: continue draft.
+          e.preventDefault();
+          w.querySelector('.jot-entry[data-export-action="continue"]')?.click();
         } else if (e.key === 'Escape' && (w.dataset.screen === 'recovery' || w.dataset.screen === 'confirm')) {
           e.preventDefault();
           jotShowWelcome(jotLoad());
@@ -1332,9 +1420,18 @@
 
     // Auto-save
     let jotTimer = null;
+    let _exportDraftTimer = null;
     editor.addEventListener('input', () => {
       // Suppress spurious snapshots while ZWS replenishment is running.
       if (_undoApplying) return;
+      // For exported files: debounce-save the current editor state as a draft
+      // so unsaved changes survive a page reload or accidental close.
+      if (jotExported) {
+        clearTimeout(_exportDraftTimer);
+        _exportDraftTimer = setTimeout(() => {
+          localStorage.setItem(JOT_EXPORT_DRAFT_KEY, editor.innerHTML);
+        }, 500);
+      }
       const w = document.getElementById('jot-welcome');
       if (w) w.remove();
       if (!jotCurrentId) jotCreate();
@@ -1501,7 +1598,13 @@
       }
 
       const htmlData = e.clipboardData.getData('text/html');
-      if (!htmlData || !htmlData.includes('<!-- jot -->')) return;
+      if (!htmlData) return;
+      // Always intercept HTML pastes — even without the <!-- jot --> marker —
+      // so that content from external apps (Word, Notes, web pages, etc.) is
+      // sanitised through htmlToLines, which strips all inline style attributes
+      // and normalises the structure. Without this, the browser's default paste
+      // inserts raw <p style="caret-color:…"> elements directly into the editor,
+      // polluting localStorage and producing verbose HTML on the next copy.
       e.preventDefault();
       const w = document.getElementById('jot-welcome');
       if (w) w.remove();
@@ -1812,6 +1915,8 @@
     //   via the Web Share API with the file attached.
     // On other touch devices (Android, etc.): trigger a direct download.
     function _jotMobileSave() {
+      // Exporting resolves unsaved changes — clear the draft.
+      if (jotExported) localStorage.removeItem(JOT_EXPORT_DRAFT_KEY);
       const fname = (jotFirstLine().replace(/\s+/g, '_') || 'jot') + '.html';
       const html  = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
       const blob  = new Blob([html], { type: 'text/html' });
@@ -1924,6 +2029,52 @@
       }
     });
 
+    // ── Exported-file unsaved-changes guard ───────────────────────────────
+    window.addEventListener('beforeunload', e => {
+      if (jotExported && localStorage.getItem(JOT_EXPORT_DRAFT_KEY)) {
+        e.preventDefault();
+        e.returnValue = ''; // Required for Chrome/Firefox to show native prompt.
+      }
+    });
+
+    // ── Empty-document placeholder hint ───────────────────────────────────
+    (function () {
+      const hint = document.getElementById('jot-hint');
+      if (!hint) return;
+
+      function _hintUpdate() {
+        const empty      = editor.textContent.trim() === '';
+        const hasWelcome = !!document.getElementById('jot-welcome');
+        if (empty && !hasWelcome) {
+          const er  = editor.getBoundingClientRect();
+          const cs  = getComputedStyle(editor);
+          const vvL = window.visualViewport ? window.visualViewport.offsetLeft : 0;
+          const vvT = window.visualViewport ? window.visualViewport.offsetTop  : 0;
+          hint.style.left    = (er.left + parseFloat(cs.paddingLeft) + vvL) + 'px';
+          hint.style.top     = (er.top  + parseFloat(cs.paddingTop)  + vvT) + 'px';
+          hint.style.display = 'block';
+        } else {
+          hint.style.display = 'none';
+        }
+      }
+
+      // Editor content changes (typing, paste, programmatic innerHTML set).
+      new MutationObserver(_hintUpdate).observe(editor, {
+        childList: true, subtree: true, characterData: true
+      });
+
+      // Welcome screen added or removed from body.
+      new MutationObserver(function (mutations) {
+        for (const m of mutations) {
+          if ([...m.addedNodes, ...m.removedNodes].some(n => n.id === 'jot-welcome')) {
+            _hintUpdate();
+            return;
+          }
+        }
+      }).observe(document.body, { childList: true });
+
+      _hintUpdate();
+    })();
 
   </script>
 </body>
