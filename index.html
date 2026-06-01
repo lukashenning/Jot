@@ -1187,7 +1187,7 @@
 
       if (sorted.length) {
         html += '<div><br></div>';
-        html += '<div class="jot-new">+ Start a new jot</div>';
+        html += '<div class="jot-new jot-entry">+ Start a new jot</div>';
         html += '<div><br></div><div><br></div>';
         sorted.forEach((entry, i) => {
           if (i > 0) html += '<div><br></div>';
@@ -1514,7 +1514,7 @@
           // Paste while on the start screen → open a fresh jot first, then let
           // the browser's paste event fire naturally on the now-ready editor.
           jotStartNew();
-        } else if (e.key !== 'Escape' && !e.metaKey && !e.ctrlKey && !e.altKey && !w.dataset.screen) {
+        } else if (e.key !== 'Escape' && e.key !== 'Enter' && e.key !== ' ' && !e.metaKey && !e.ctrlKey && !e.altKey && !w.dataset.screen) {
           w.remove();
           jotCurrentId = null;
           if (!e.defaultPrevented) {
