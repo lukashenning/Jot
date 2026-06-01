@@ -438,17 +438,36 @@
     function plainNodes(node) {
       if (node.nodeType === Node.TEXT_NODE) return node.cloneNode();
       if (node.nodeName === 'BR') return node.cloneNode();
-      if (node.nodeName === 'A') {
-        const a = document.createElement('a');
-        a.href = node.getAttribute('href') || '';
-        a.target = '_blank';
-        a.rel = 'noopener noreferrer';
-        for (const child of node.childNodes) a.appendChild(plainNodes(child));
-        return a;
-      }
+      // <a> is intentionally NOT preserved here — pressing Enter should not
+      // carry link formatting to the new line, consistent with B/I/U stripping.
       const frag = document.createDocumentFragment();
       for (const child of node.childNodes) frag.appendChild(plainNodes(child));
       return frag;
+    }
+
+    // Strip <a> wrappers from a fragment in-place, keeping their text content.
+    // Used by the list-line Enter handler which bypasses plainNodes().
+    function _stripLinks(frag) {
+      for (const a of Array.from(frag.querySelectorAll('a'))) {
+        while (a.firstChild) a.before(a.firstChild);
+        a.remove();
+      }
+      return frag;
+    }
+
+    // Returns the <a> element if the collapsed range is at its very end,
+    // null otherwise. Used to escape link context before typing.
+    function _atLinkEnd(range) {
+      if (!range.collapsed) return null;
+      const c = range.startContainer, o = range.startOffset;
+      // Cursor at end of a text node whose parent is <a>
+      if (c.nodeType === Node.TEXT_NODE && c.parentNode?.nodeName === 'A'
+          && o === c.length && c === c.parentNode.lastChild) {
+        return c.parentNode;
+      }
+      // Cursor at end of the <a> element itself
+      if (c.nodeName === 'A' && o === c.childNodes.length) return c;
+      return null;
     }
 
     function getCursorColumn(lineEl) {
@@ -867,6 +886,28 @@
         return;
       }
 
+      // When the caret is at the trailing edge of a link, typing should produce
+      // plain text rather than extend the link. Intercept printable characters,
+      // insert them in a new text node placed after the <a>, and return.
+      if (e.key.length === 1 && !e.metaKey && !e.ctrlKey && !e.altKey) {
+        const _ls = window.getSelection();
+        if (_ls && _ls.rangeCount) {
+          const _la = _atLinkEnd(_ls.getRangeAt(0));
+          if (_la) {
+            e.preventDefault();
+            const _lt = document.createTextNode(e.key);
+            _la.after(_lt);
+            const _lr = document.createRange();
+            _lr.setStart(_lt, 1);
+            _lr.collapse(true);
+            _ls.removeAllRanges();
+            _ls.addRange(_lr);
+            editor.dispatchEvent(new Event('input', { bubbles: true }));
+            return;
+          }
+        }
+      }
+
       const lineEl = getLineEl();
       if (!lineEl) return;
       const isList = lineEl.classList.contains('list-line');
@@ -952,6 +993,9 @@
         range.insertNode(br);
         const space = document.createTextNode(' ');
         br.after(space);
+        // If the insertion landed inside a link, escape br+space outside it.
+        const _seA = br.closest ? br.closest('a') : null;
+        if (_seA) { _seA.after(br); br.after(space); }
         const newRange = document.createRange();
         newRange.setStart(space, 0);
         newRange.collapse(true);
@@ -987,7 +1031,7 @@
         newLine.classList.add('list-line');
         setLevel(newLine, getLevel(lineEl));
         if (lineEl.dataset.bullet) newLine.dataset.bullet = lineEl.dataset.bullet;
-        newLine.appendChild(fragment);
+        newLine.appendChild(_stripLinks(fragment));
         if (!newLine.textContent && !newLine.querySelector('br')) newLine.innerHTML = '<br>';
         lineEl.after(newLine);
         if (!lineEl.textContent && !lineEl.querySelector('br')) lineEl.innerHTML = '<br>';
@@ -1042,12 +1086,17 @@
       // any text in the editor, regardless of whether it's wrapped, is found.
       // Walk all child elements to find the first line that has actual content,
       // so documents that start with one or more blank lines still show a title.
+      // Strip zero-width spaces (​) before the emptiness check — Jot
+      // inserts ZWS for undo/caret reasons and trim() does not remove them,
+      // so a visually-empty line with only a ZWS would otherwise be mistaken
+      // for the title line.
+      const clean = s => s.replace(/​/g, '').trim();
       for (const el of editor.children) {
-        const t = el.textContent.trim();
+        const t = clean(el.textContent);
         if (t) return t;
       }
       // Bare text node fallback (browser-native select-all + delete edge case).
-      return editor.textContent.trim();
+      return clean(editor.textContent);
     }
 
     function jotSaveCurrent() {
