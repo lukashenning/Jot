@@ -129,6 +129,15 @@
        keyboard-selected still shows its selection highlight.
        Class is removed on the next mousemove event (see JS below). */
     body.jot-kb-nav .jot-entry:hover:not(.jot-entry-selected) { background: none; }
+    /* Drag-and-drop file target indicator */
+    body.jot-drag-target::after {
+      content: '';
+      position: fixed;
+      inset: 0;
+      box-shadow: inset 0 0 0 3px rgba(0, 0, 0, 0.2);
+      pointer-events: none;
+      z-index: 500;
+    }
     #jot-welcome u { text-decoration: none; background: rgba(255, 200, 0, 0.3); }
     @media (max-width: 600px), (pointer: coarse) {
       #editor, #jot-welcome { padding: 1rem; }
@@ -834,7 +843,8 @@
           // then restore 'Jot' after the dialog has had a chance to read it.
           const first = jotFirstLine();
           document.title = first ? first.replace(/\s+/g, '_') : 'jot';
-          setTimeout(() => { document.title = 'Jot'; }, 1000);
+          clearTimeout(_titleResetTimer);
+          _titleResetTimer = setTimeout(() => { document.title = 'Jot'; }, 1000);
         }
         return;
       }
@@ -1135,9 +1145,11 @@
           html += `<div class="jot-entry" data-id="${entry.id}">[${jotFmt(entry.updatedAt)}] ${jotEsc(entry.firstLine || '(empty)')}</div>`;
         });
         html += '<div><br></div><div><br></div>';
+        html += '<div class="jot-entry" data-import-trigger="1">Import</div>';
+        html += '<div><br></div>';
         html += '<div class="jot-entry" data-recovery="1">Recovery</div>';
         html += '<div><br></div>';
-        html += '<div class="jot-clear">Reset (Backspace)</div>';
+        html += '<div class="jot-clear">Reset</div>';
       }
 
       html += '<div><br></div><div><u>v7</u></div><div><u>Lukas Henning 27/05/2026</u></div><div><br></div>';
@@ -1152,6 +1164,7 @@
         }
         const entryEl = e.target.closest('.jot-entry');
         if (entryEl) {
+          if (entryEl.dataset.importTrigger) { jotShowImport(); return; }
           if (entryEl.dataset.recovery) { jotShowRecovery(); return; }
           const entry = cleaned.find(en => en.id === entryEl.dataset.id);
           if (entry) jotOpenEntry(entry);
@@ -1214,6 +1227,63 @@
           sel.addRange(r);
         }
       });
+    }
+
+    // ── Import ────────────────────────────────────────────────────────────────
+    async function jotImportFile(file) {
+      try {
+        const text = await file.text();
+        const doc  = new DOMParser().parseFromString(text, 'text/html');
+        const editorEl = doc.getElementById('editor');
+        if (!editorEl) return false;        // not a Jot file
+        const html = editorEl.innerHTML;
+        if (!editorEl.textContent.trim()) return false;  // empty document
+        let firstLine = '';
+        for (const el of editorEl.children) {
+          const t = el.textContent.trim();
+          if (t) { firstLine = t; break; }
+        }
+        if (!firstLine) firstLine = editorEl.textContent.trim().slice(0, 80);
+        const now     = new Date().toISOString();
+        const entries = jotLoad();
+        // Normalise both titles before comparing: collapse all whitespace
+        // including non-breaking spaces ( ) that Jot stores in list lines.
+        const _norm = s => s.replace(/[ \s]+/g, ' ').trim();
+        const existing = entries.find(e => e.firstLine && _norm(e.firstLine) === _norm(firstLine));
+        if (existing) {
+          existing.html      = html;
+          existing.firstLine = firstLine;
+          existing.updatedAt = now;
+        } else {
+          const id = now + '_' + Math.random().toString(36).slice(2);
+          entries.push({ id, html, firstLine, createdAt: now, updatedAt: now });
+        }
+        jotPersist(entries);
+        return true;
+      } catch (_) { return false; }
+    }
+
+    async function jotImportFromFiles(files) {
+      const htmlFiles = Array.from(files).filter(f => /\.html?$/i.test(f.name));
+      let count = 0;
+      for (const f of htmlFiles) if (await jotImportFile(f)) count++;
+      return count;
+    }
+
+    function jotShowImport() {
+      // The web has no single native dialog that accepts both files and folders
+      // simultaneously — those are separate browser APIs. This opens a standard
+      // multi-file picker for .html/.htm files. Folder import is available via
+      // drag and drop (which already handles recursive folder walks).
+      const input = document.createElement('input');
+      input.type     = 'file';
+      input.accept   = '.html,.htm';
+      input.multiple = true;
+      input.addEventListener('change', async () => {
+        await jotImportFromFiles(input.files);
+        jotShowWelcome(jotLoad());
+      });
+      input.click();
     }
 
     function jotShowClearConfirm() {
@@ -1378,6 +1448,9 @@
         } else if ((e.key === 'Enter' || e.key === ' ') && selEl) {
           e.preventDefault();
           selEl.click();
+        } else if ((e.metaKey || e.ctrlKey) && e.key === 'o') {
+          e.preventDefault();
+          jotShowImport();
         } else if (e.key === 'Escape' && w.dataset.screen === 'export-recovery') {
           // Escape on the export-recovery screen = safe choice: continue draft.
           e.preventDefault();
@@ -1414,6 +1487,10 @@
           // (e.g. converted the first line to a list via -, >, or +) — keep
           // that result and do not reset the editor content.
         }
+      } else if ((e.metaKey || e.ctrlKey) && e.key === 'o' && !jotExported) {
+        e.preventDefault();
+        jotSaveCurrent();
+        jotShowImport();
       } else if (e.key === 'Escape' && !jotExported) {
         e.preventDefault();
         doEscape();
@@ -1433,6 +1510,7 @@
     // Auto-save
     let jotTimer = null;
     let _exportDraftTimer = null;
+    let _titleResetTimer = null;
     editor.addEventListener('input', () => {
       // Suppress spurious snapshots while ZWS replenishment is running.
       if (_undoApplying) return;
@@ -2048,6 +2126,70 @@
         e.returnValue = ''; // Required for Chrome/Firefox to show native prompt.
       }
     });
+
+    // ── Drag-and-drop import (main app only, not exported files) ─────────
+    if (!jotExported) {
+      let _dragDepth = 0;
+
+      document.addEventListener('dragenter', e => {
+        if (!e.dataTransfer.types.includes('Files')) return;
+        if (++_dragDepth === 1) document.body.classList.add('jot-drag-target');
+      });
+
+      document.addEventListener('dragleave', () => {
+        if (--_dragDepth <= 0) {
+          _dragDepth = 0;
+          document.body.classList.remove('jot-drag-target');
+        }
+      });
+
+      document.addEventListener('dragover', e => {
+        if (e.dataTransfer.types.includes('Files')) e.preventDefault();
+      });
+
+      document.addEventListener('drop', async e => {
+        e.preventDefault();
+        _dragDepth = 0;
+        document.body.classList.remove('jot-drag-target');
+
+        // Collect all .html files from dropped files and folders recursively.
+        const files = [];
+
+        async function _walkEntry(entry) {
+          if (entry.isFile) {
+            if (/\.html?$/i.test(entry.name)) {
+              const f = await new Promise(r => entry.file(r));
+              files.push(f);
+            }
+          } else if (entry.isDirectory) {
+            const reader = entry.createReader();
+            let batch;
+            // readEntries returns ≤100 items per call; loop until exhausted.
+            do {
+              batch = await new Promise((res, rej) => reader.readEntries(res, rej));
+              for (const child of batch) await _walkEntry(child);
+            } while (batch.length > 0);
+          }
+        }
+
+        for (const item of e.dataTransfer.items) {
+          if (item.kind !== 'file') continue;
+          const entry = item.webkitGetAsEntry ? item.webkitGetAsEntry() : null;
+          if (entry) {
+            await _walkEntry(entry);
+          } else {
+            // Fallback: no FileSystem API, treat as plain file.
+            const f = item.getAsFile();
+            if (f && /\.html?$/i.test(f.name)) files.push(f);
+          }
+        }
+
+        if (!files.length) return;
+        jotSaveCurrent();
+        await jotImportFromFiles(files);
+        jotShowWelcome(jotLoad());
+      });
+    }
 
     // ── Empty-document placeholder hint ───────────────────────────────────
     (function () {
