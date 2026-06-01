@@ -1142,7 +1142,7 @@
         html += '<div><br></div><div><br></div>';
         sorted.forEach((entry, i) => {
           if (i > 0) html += '<div><br></div>';
-          html += `<div class="jot-entry" data-id="${entry.id}">[${jotFmt(entry.updatedAt)}] ${jotEsc(entry.firstLine || '(empty)')}</div>`;
+          html += `<div class="jot-entry" data-id="${entry.id}">[${jotFmt(entry.updatedAt)}]<br>${jotEsc(entry.firstLine || '(empty)')}</div>`;
         });
         html += '<div><br></div><div><br></div>';
         html += '<div class="jot-entry" data-import-trigger="1">Import</div>';
