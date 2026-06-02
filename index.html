@@ -912,6 +912,26 @@
       if (!lineEl) return;
       const isList = lineEl.classList.contains('list-line');
 
+      // Arrow-down into an empty list-line: the browser can't reliably place
+      // the cursor in a list-line div that contains only <br> (the ::before
+      // pseudo-element + padding-left confuse its hit-test). Navigate manually.
+      if (e.key === 'ArrowDown' && !e.shiftKey && !e.metaKey && !e.altKey) {
+        const nextEl = lineEl.nextElementSibling;
+        if (nextEl && nextEl.classList.contains('list-line') &&
+            !nextEl.textContent.replace(/​/g, '').trim() &&
+            !nextEl.querySelector('img')) {
+          e.preventDefault();
+          const _nr = document.createRange();
+          _nr.setStart(nextEl, 0);
+          _nr.collapse(true);
+          const _ns = window.getSelection();
+          _ns.removeAllRanges();
+          _ns.addRange(_nr);
+          requestAnimationFrame(jotScrollToCursor);
+          return;
+        }
+      }
+
       if (e.key === '-' && isAtStart(lineEl)) {
         e.preventDefault();
         jotUndoSnap();
@@ -1084,19 +1104,18 @@
       // filter the entry out and delete it from localStorage even though the
       // user has typed new content. Fall back to the full textContent so that
       // any text in the editor, regardless of whether it's wrapped, is found.
-      // Walk all child elements to find the first line that has actual content,
-      // so documents that start with one or more blank lines still show a title.
-      // Strip zero-width spaces (​) before the emptiness check — Jot
-      // inserts ZWS for undo/caret reasons and trim() does not remove them,
-      // so a visually-empty line with only a ZWS would otherwise be mistaken
-      // for the title line.
+      // Walk all child nodes (not just element children) so that bare text
+      // nodes left directly under the editor after a browser-native multi-line
+      // selection delete are also considered — they would be missed by
+      // editor.children which only returns element nodes.
+      // Strip ZWS before the emptiness check: Jot inserts ​ for
+      // undo/caret reasons and trim() does not remove it.
       const clean = s => s.replace(/​/g, '').trim();
-      for (const el of editor.children) {
-        const t = clean(el.textContent);
+      for (const node of editor.childNodes) {
+        const t = clean(node.textContent);
         if (t) return t;
       }
-      // Bare text node fallback (browser-native select-all + delete edge case).
-      return clean(editor.textContent);
+      return '';
     }
 
     function jotSaveCurrent() {
@@ -1563,6 +1582,33 @@
     editor.addEventListener('input', () => {
       // Suppress spurious snapshots while ZWS replenishment is running.
       if (_undoApplying) return;
+
+      // Normalise structure: after a browser-native multi-line selection delete
+      // some browsers leave editor.innerHTML = '' so the next keystroke inserts
+      // a bare text node directly under the editor instead of inside a <div>.
+      // getLineEl() can't find a line element for a bare text node and returns
+      // null, breaking Enter and other handlers. Wrap any bare text nodes now,
+      // preserving the caret position inside the newly created <div>.
+      for (const _tn of Array.from(editor.childNodes)) {
+        if (_tn.nodeType !== Node.TEXT_NODE) continue;
+        const _sel = window.getSelection();
+        let _co = -1;
+        if (_sel && _sel.rangeCount) {
+          const _r = _sel.getRangeAt(0);
+          if (_r.collapsed && _r.startContainer === _tn) _co = _r.startOffset;
+        }
+        const _wd = document.createElement('div');
+        _tn.before(_wd);
+        _wd.appendChild(_tn);
+        if (_co >= 0 && _sel) {
+          const _nr = document.createRange();
+          _nr.setStart(_wd.firstChild, _co);
+          _nr.collapse(true);
+          _sel.removeAllRanges();
+          _sel.addRange(_nr);
+        }
+      }
+
       // For exported files: debounce-save the current editor state as a draft
       // so unsaved changes survive a page reload or accidental close.
       if (jotExported) {
