@@ -43,6 +43,7 @@
       width: 100%;
       min-height: 100vh;
       padding: 2rem;
+      padding-bottom: 6rem;
       box-sizing: border-box;
       font-family: ui-monospace, 'SF Mono', monospace;
       caret-color: transparent;
@@ -64,6 +65,9 @@
     #editor u {
       text-decoration: none;
       background: rgba(255, 200, 0, 0.3);
+    }
+    #editor u::selection {
+      background: rgba(0, 0, 0, 0.12);
     }
     #editor a {
       color: #FFB500;
@@ -93,6 +97,12 @@
     }
     .list-line[data-bullet="check"]::before {
       content: "\00a0\2713 ";
+    }
+    .list-line[data-bullet="star"]::before {
+      content: "\00a0* ";
+    }
+    .list-line.jot-sel::before {
+      background: rgba(0, 0, 0, 0.12);
     }
     .list-line[data-bullet="check"] {
       color: #999;
@@ -141,7 +151,7 @@
     #jot-welcome u { text-decoration: none; background: rgba(255, 200, 0, 0.3); }
     @media (max-width: 600px), (pointer: coarse) {
       #editor, #jot-welcome { padding: 1rem; }
-      #editor { padding-left: 16px; padding-right: 16px; }
+      #editor { padding-left: 16px; padding-right: 16px; padding-bottom: 6rem; }
     }
     /* Hide the editor and its cursor whenever any welcome/recovery/confirm
        overlay is present — prevents the document from bleeding through. */
@@ -254,6 +264,12 @@
       }
       #editor u {
         background: rgba(255, 200, 0, 0.6);
+      }
+      #editor u::selection {
+        background: rgba(255, 255, 255, 0.5);
+      }
+      .list-line.jot-sel::before {
+        background: rgba(255, 255, 255, 0.5);
       }
       #jot-welcome {
         background: #111;
@@ -396,8 +412,68 @@
     // later than keydown (which fires before the DOM updates) and more reliably
     // than input on iOS (where the selection can still lag behind at input time).
     // Gated to editor focus so unrelated selections elsewhere don't trigger it.
+    let _jotSelRaf = 0;
     document.addEventListener('selectionchange', () => {
       if (document.activeElement === editor) _cursorDirty = true;
+
+      // Defer jot-sel DOM mutations to requestAnimationFrame so they never run
+      // synchronously inside a drag-selectionchange. If they ran synchronously,
+      // some Safari/Chrome builds re-evaluate the range after the mutation,
+      // collapsing it before the copy handler reads it — breaking copy-paste.
+      cancelAnimationFrame(_jotSelRaf);
+      _jotSelRaf = requestAnimationFrame(() => {
+      // Highlight the ::before bullet of any list-line that is fully covered by
+      // the selection — meaning the copy handler would emit it as type:'list'
+      // (not partial). This keeps the visual cue in sync with copy/paste behaviour.
+      const _jsSel = window.getSelection();
+      for (const _jsEl of editor.querySelectorAll('.list-line.jot-sel')) {
+        _jsEl.classList.remove('jot-sel');
+      }
+      if (_jsSel && !_jsSel.isCollapsed && _jsSel.rangeCount) {
+        const _jsRange = _jsSel.getRangeAt(0);
+        // Identify which editor child holds the selection start and end.
+        // When startContainer/endContainer IS the editor element (e.g. drag from
+        // ::before area), don't walk up — index into childNodes directly.
+        let _jsStartEl = _jsRange.startContainer;
+        if (_jsStartEl === editor) {
+          _jsStartEl = editor.childNodes[_jsRange.startOffset] || null;
+        } else {
+          while (_jsStartEl && _jsStartEl.parentNode !== editor) _jsStartEl = _jsStartEl.parentNode;
+        }
+        let _jsEndEl = _jsRange.endContainer;
+        if (_jsEndEl === editor) {
+          // endOffset points AFTER the last included child
+          _jsEndEl = editor.childNodes[Math.max(0, _jsRange.endOffset - 1)] || null;
+        } else {
+          while (_jsEndEl && _jsEndEl.parentNode !== editor) _jsEndEl = _jsEndEl.parentNode;
+        }
+        for (const _jsLine of editor.querySelectorAll('.list-line')) {
+          if (!_jsRange.intersectsNode(_jsLine)) continue;
+          const _jsIsFirst = _jsLine === _jsStartEl;
+          const _jsIsLast  = _jsLine === _jsEndEl;
+          let _jsStartOk = true, _jsEndOk = true;
+          // Mirror start-side partial check from the copy handler
+          if (_jsIsFirst && _jsLine.contains(_jsRange.startContainer)) {
+            try {
+              const _sr = document.createRange();
+              _sr.setStart(_jsLine, 0);
+              _sr.setEnd(_jsRange.startContainer, _jsRange.startOffset);
+              _jsStartOk = !_sr.toString().trim();
+            } catch (_) { _jsStartOk = false; }
+          }
+          // Mirror end-side partial check from the copy handler
+          if (_jsEndOk && _jsIsLast && _jsLine.contains(_jsRange.endContainer)) {
+            try {
+              const _er = document.createRange();
+              _er.setStart(_jsRange.endContainer, _jsRange.endOffset);
+              _er.setEnd(_jsLine, _jsLine.childNodes.length);
+              _jsEndOk = !_er.toString().trim();
+            } catch (_) { _jsEndOk = false; }
+          }
+          if (_jsStartOk && _jsEndOk) _jsLine.classList.add('jot-sel');
+        }
+      }
+      }); // end requestAnimationFrame
     }, { passive: true });
     editor.focus();
 
@@ -511,9 +587,7 @@
       if (!rect) return;
       const vvh = window.visualViewport ? window.visualViewport.height : window.innerHeight;
       const lineH = rect.height || 20;
-      // On touch devices one line-height of clearance is enough (the on-screen
-      // keyboard already provides visual separation); on desktop keep two.
-      const clearance = window.matchMedia('(pointer: coarse)').matches ? lineH : lineH * 2;
+      const clearance = lineH * 2;
       if (rect.bottom > vvh - clearance) {
         window.scrollBy(0, rect.bottom - (vvh - clearance));
       } else if (rect.top < 0) {
@@ -587,7 +661,7 @@
     function jotUndoSnap() {
       clearTimeout(_undoTimer);
       _undoTimer = null;
-      const state = { html: editor.innerHTML, cur: _undoCurPos() };
+      const state = { html: _getEditorHtml(), cur: _undoCurPos() };
       const last = _undoStack[_undoStack.length - 1];
       if (last && last.html === state.html) return; // deduplicate
       _undoStack.push(state);
@@ -595,12 +669,18 @@
       _redoStack.length = 0;
     }
 
+    // Return editor HTML with the transient bullet-selection class stripped so it
+    // never leaks into undo snapshots, saved notes, or deduplication comparisons.
+    function _getEditorHtml() {
+      return editor.innerHTML.replace(/ jot-sel\b/g, '');
+    }
+
     // Flush a pending input-debounce snapshot without clearing the redo branch.
     function _undoFlush() {
       if (!_undoTimer) return;
       clearTimeout(_undoTimer);
       _undoTimer = null;
-      const state = { html: editor.innerHTML, cur: _undoCurPos() };
+      const state = { html: _getEditorHtml(), cur: _undoCurPos() };
       const last = _undoStack[_undoStack.length - 1];
       if (!last || last.html !== state.html) {
         _undoStack.push(state);
@@ -610,6 +690,8 @@
 
     function _undoApply(state) {
       editor.innerHTML = state.html;
+      // Strip any jot-sel that may have been frozen into old snapshots.
+      for (const _ua of editor.querySelectorAll('.jot-sel')) _ua.classList.remove('jot-sel');
       _undoSetCur(state.cur);
       clearTimeout(jotTimer);
       if (jotCurrentId) jotTimer = setTimeout(jotSaveCurrent, 500);
@@ -682,7 +764,7 @@
     function _doUndo() {
       _undoFlush();
       if (!_undoStack.length) return;
-      const curHtml = editor.innerHTML;
+      const curHtml = _getEditorHtml();
       const top = _undoStack[_undoStack.length - 1];
       if (top.html !== curHtml) {
         // Un-checkpointed current state → save to redo, restore checkpoint
@@ -697,7 +779,7 @@
     function _doRedo() {
       if (!_redoStack.length) return;
       const state = _redoStack.pop();
-      const curHtml = editor.innerHTML;
+      const curHtml = _getEditorHtml();
       const top = _undoStack[_undoStack.length - 1];
       if (!top || top.html !== curHtml) {
         _undoStack.push({ html: curHtml, cur: _undoCurPos() });
@@ -915,6 +997,36 @@
       // Arrow-down into an empty list-line: the browser can't reliably place
       // the cursor in a list-line div that contains only <br> (the ::before
       // pseudo-element + padding-left confuse its hit-test). Navigate manually.
+      // Shift+Option+Up/Down: extend selection to the same paragraph boundary
+      // that bare Option+Up/Down moves the cursor to. The key insight:
+      // modify('paragraph') moves by one paragraph UNIT (jumps to the NEXT
+      // paragraph boundary), while Option+Up/Down moves to the START/END of
+      // the CURRENT paragraph — that is 'paragraphboundary' granularity.
+      // Approach: save the anchor, collapse+move with 'paragraphboundary'
+      // (which lands at the exact same spot as native Option+Arrow), capture
+      // the new cursor position, then rebuild the selection from anchor to there.
+      if ((e.key === 'ArrowUp' || e.key === 'ArrowDown') && e.shiftKey && e.altKey && !e.metaKey) {
+        e.preventDefault();
+        const _pSel = window.getSelection();
+        if (_pSel && _pSel.modify && _pSel.rangeCount) {
+          const _anNode = _pSel.anchorNode;
+          const _anOff  = _pSel.anchorOffset;
+          // Collapse+move exactly like native Option+Arrow
+          _pSel.modify('move', e.key === 'ArrowDown' ? 'forward' : 'backward', 'paragraphboundary');
+          const _fNode = _pSel.focusNode;
+          const _fOff  = _pSel.focusOffset;
+          // Rebuild: place cursor at anchor, then extend to captured position
+          const _ar = document.createRange();
+          _ar.setStart(_anNode, _anOff);
+          _ar.collapse(true);
+          _pSel.removeAllRanges();
+          _pSel.addRange(_ar);
+          _pSel.extend(_fNode, _fOff);
+        }
+        requestAnimationFrame(jotScrollToCursor);
+        return;
+      }
+
       if (e.key === 'ArrowDown' && !e.shiftKey && !e.metaKey && !e.altKey) {
         const nextEl = lineEl.nextElementSibling;
         if (nextEl && nextEl.classList.contains('list-line') &&
@@ -959,6 +1071,12 @@
         e.preventDefault(); jotUndoSnap();
         if (!isList) { lineEl.classList.add('list-line'); setLevel(lineEl, 0); }
         lineEl.dataset.bullet = 'check';
+        return;
+      }
+      if (e.key === '*' && isAtStart(lineEl)) {
+        e.preventDefault(); jotUndoSnap();
+        if (!isList) { lineEl.classList.add('list-line'); setLevel(lineEl, 0); }
+        lineEl.dataset.bullet = 'star';
         return;
       }
 
@@ -1011,13 +1129,11 @@
         range.deleteContents();
         const br = document.createElement('br');
         range.insertNode(br);
-        const space = document.createTextNode(' ');
-        br.after(space);
-        // If the insertion landed inside a link, escape br+space outside it.
+        // If the insertion landed inside a link, escape br outside it.
         const _seA = br.closest ? br.closest('a') : null;
-        if (_seA) { _seA.after(br); br.after(space); }
+        if (_seA) { _seA.after(br); }
         const newRange = document.createRange();
-        newRange.setStart(space, 0);
+        newRange.setStartAfter(br);
         newRange.collapse(true);
         sel.removeAllRanges();
         sel.addRange(newRange);
@@ -1123,7 +1239,7 @@
       const entries = jotLoad();
       const entry = entries.find(e => e.id === jotCurrentId);
       if (!entry) return;
-      entry.html = editor.innerHTML;
+      entry.html = _getEditorHtml();
       entry.firstLine = jotFirstLine();
       entry.updatedAt = new Date().toISOString();
       jotPersist(entries);
@@ -1134,7 +1250,7 @@
       const now = new Date().toISOString();
       jotCurrentId = now + '_' + Math.random().toString(36).slice(2);
       const entries = jotLoad();
-      entries.push({ id: jotCurrentId, html: editor.innerHTML, firstLine: jotFirstLine(), createdAt: now, updatedAt: now });
+      entries.push({ id: jotCurrentId, html: _getEditorHtml(), firstLine: jotFirstLine(), createdAt: now, updatedAt: now });
       jotPersist(entries);
     }
 
@@ -1154,7 +1270,7 @@
       if (w) w.remove();
       editor.innerHTML = entry.html;
       jotUndoClear();
-      _undoStack.push({ html: editor.innerHTML, cur: 0 });
+      _undoStack.push({ html: _getEditorHtml(), cur: 0 });
       jotCurrentId = entry.id;
       jotFromRecovery = false;
       editor.focus();
@@ -1176,7 +1292,7 @@
       jotFromRecovery = false;
       editor.innerHTML = '<div><br></div>';
       jotUndoClear();
-      _undoStack.push({ html: editor.innerHTML, cur: 0 });
+      _undoStack.push({ html: _getEditorHtml(), cur: 0 });
       editor.focus();
       const first = editor.firstChild;
       if (first) {
@@ -1279,7 +1395,7 @@
         if (entryEl.dataset.exportAction === 'continue') {
           editor.innerHTML = draft;
           jotUndoClear();
-          _undoStack.push({ html: editor.innerHTML, cur: 0 });
+          _undoStack.push({ html: _getEditorHtml(), cur: 0 });
         } else {
           // Revert: delete draft — original file content is already in the editor.
           localStorage.removeItem(JOT_EXPORT_DRAFT_KEY);
@@ -1631,7 +1747,7 @@
       clearTimeout(_undoTimer);
       _undoTimer = setTimeout(() => {
         _undoTimer = null;
-        const state = { html: editor.innerHTML, cur: _undoCurPos() };
+        const state = { html: _getEditorHtml(), cur: _undoCurPos() };
         const last = _undoStack[_undoStack.length - 1];
         if (!last || last.html !== state.html) {
           _undoStack.push(state);
@@ -1839,6 +1955,12 @@
           div.classList.add('list-line');
           div.style.setProperty('--level', line.level);
           if (line.bullet) div.dataset.bullet = line.bullet;
+        } else if (i === 0 && lineEl.classList.contains('list-line')) {
+          // Pasting plain content into a list-line: first pasted line inherits
+          // the host line's list attributes so the bullet is not silently lost.
+          div.classList.add('list-line');
+          div.style.setProperty('--level', getLevel(lineEl));
+          if (lineEl.dataset.bullet) div.dataset.bullet = lineEl.dataset.bullet;
         }
         const content = (i === 0 ? beforeHtml : '') + line.html + (i === lines.length - 1 ? afterHtml : '');
         div.innerHTML = content || '<br>';
@@ -1912,7 +2034,7 @@
               const tr = document.createRange();
               tr.setStart(lineEl, 0);
               tr.setEnd(range.startContainer, range.startOffset);
-              if (tr.toString() !== '') partial = true;
+              if (tr.toString().trim() !== '') partial = true;
             } catch (_) {}
           }
           if (!partial && isLast && lineEl.contains(range.endContainer)) {
@@ -1920,7 +2042,7 @@
               const tr = document.createRange();
               tr.setStart(range.endContainer, range.endOffset);
               tr.setEnd(lineEl, lineEl.childNodes.length);
-              if (tr.toString() !== '') partial = true;
+              if (tr.toString().trim() !== '') partial = true;
             } catch (_) {}
           }
           if (partial) {
@@ -1989,7 +2111,7 @@
               const tr = document.createRange();
               tr.setStart(lineEl, 0);
               tr.setEnd(range.startContainer, range.startOffset);
-              if (tr.toString() !== '') partial = true;
+              if (tr.toString().trim() !== '') partial = true;
             } catch (_) {}
           }
           if (!partial && isLast && lineEl.contains(range.endContainer)) {
@@ -1997,7 +2119,7 @@
               const tr = document.createRange();
               tr.setStart(range.endContainer, range.endOffset);
               tr.setEnd(lineEl, lineEl.childNodes.length);
-              if (tr.toString() !== '') partial = true;
+              if (tr.toString().trim() !== '') partial = true;
             } catch (_) {}
           }
           if (!partial) {
@@ -2196,7 +2318,7 @@
       } else if (e.inputType === 'insertLineBreak') {
         const lineEl = getLineEl();
         if (lineEl && lineEl.classList.contains('list-line')) e.preventDefault();
-      } else if (e.inputType === 'insertText' && (e.data === '-' || e.data === '>' || e.data === '+' || e.data === '#')) {
+      } else if (e.inputType === 'insertText' && (e.data === '-' || e.data === '>' || e.data === '+' || e.data === '#' || e.data === '*')) {
         // Android keyboards fire beforeinput with insertText instead of keydown
         // with the correct e.key. Catch list-creation chars here so they work on
         // Android without affecting desktop (keydown already handled those there).
@@ -2209,6 +2331,7 @@
           if (e.data === '>') lineEl.dataset.bullet = 'arrow';
           else if (e.data === '+') lineEl.dataset.bullet = 'plus';
           else if (e.data === '#') lineEl.dataset.bullet = 'check';
+          else if (e.data === '*') lineEl.dataset.bullet = 'star';
           else lineEl.removeAttribute('data-bullet');
         }
       }
