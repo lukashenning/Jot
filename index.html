@@ -246,6 +246,24 @@
       padding-bottom: 0;
     }
     /* toolbar hidden — @media (pointer: coarse) block removed */
+    #jot-ipad-home {
+      display: none;
+      position: fixed;
+      top: 0.4rem;
+      right: 0.6rem;
+      z-index: 200;
+      background: none;
+      border: none;
+      font-family: ui-monospace, 'SF Mono', monospace;
+      font-size: 2.2rem;
+      line-height: 1;
+      padding: 5px 8px;
+      color: inherit;
+      -webkit-tap-highlight-color: transparent;
+      touch-action: manipulation;
+      cursor: pointer;
+    }
+    #jot-ipad-home:active { opacity: 0.5; }
 
     @media (prefers-color-scheme: dark) {
       body {
@@ -297,6 +315,7 @@
       <button id="jtb-underline">U</button>
     </div>
   </div>
+  <button id="jot-ipad-home">⌂</button>
 
   <!-- Default "Jot Features" document — stored as plain markup so it reads
        and edits like any other Jot document. jotSeedFeatures() reads
@@ -359,7 +378,12 @@
       // changes (e.g. deleting several list lines in quick succession) the engine
       // can return stale getBoundingClientRect values until a reflow is triggered
       // (which normally only happens on scroll). Touching offsetHeight is enough.
-      void editor.offsetHeight;
+      // Skip on non-iOS: with images in the document it causes fractional-pixel
+      // layout jitter that spuriously triggers autoscroll on horizontal typing.
+      if (/iPhone|iPad|iPod/.test(navigator.userAgent) ||
+          (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)) {
+        void editor.offsetHeight;
+      }
       let rect = range.getBoundingClientRect();
       if (rect && rect.height > 0) return rect;
       const marker = document.createElement('span');
@@ -2139,6 +2163,8 @@
       const t = document.getElementById('jot-toolbar');
       if (t) { t.style.visibility = 'hidden'; t.style.top = ''; }
       editor.style.paddingTop = '';
+      const _hb = document.getElementById('jot-ipad-home');
+      if (_hb) _hb.style.display = 'none';
     }
 
     function jotToolbarPin() {
@@ -2153,13 +2179,27 @@
     }
 
     function jotToolbarShow() {
+      const _isIPad = /iPad/.test(navigator.userAgent) ||
+                      (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1 &&
+                       !/iPhone/.test(navigator.userAgent));
       // Never run on desktop — prevents padding being applied to the editor there.
-      if (!window.matchMedia('(pointer: coarse)').matches) return;
+      if (!window.matchMedia('(pointer: coarse)').matches && !_isIPad) return;
       if (document.getElementById('jot-welcome')) return;
       const t = document.getElementById('jot-toolbar');
       if (!t) return;
       jotToolbarPin();
       t.style.visibility = 'visible';
+      // On iPad: show the ⌂ home button and add top padding for it.
+      if (_isIPad) {
+        const _hb = document.getElementById('jot-ipad-home');
+        if (_hb) _hb.style.display = 'block';
+        requestAnimationFrame(() => {
+          const _hb2 = document.getElementById('jot-ipad-home');
+          const _hbH = _hb2 ? (_hb2.offsetHeight || 32) : 32;
+          editor.style.paddingTop = (_hbH + 8) + 'px';
+        });
+        return;
+      }
       // Push editor content below the pill so the first line isn't hidden.
       // Read the actual rendered height so this stays correct if CSS changes.
       requestAnimationFrame(() => {
@@ -2186,6 +2226,9 @@
       [inner, ...toolbar.querySelectorAll('button')].forEach(el =>
         el.addEventListener('pointerdown', e => e.preventDefault())
       );
+
+      const _ipadHomeBtn = document.getElementById('jot-ipad-home');
+      if (_ipadHomeBtn) _ipadHomeBtn.addEventListener('click', () => doEscape());
 
       document.getElementById('jtb-undo').addEventListener('click', () => _doUndo());
       document.getElementById('jtb-redo').addEventListener('click', () => _doRedo());
