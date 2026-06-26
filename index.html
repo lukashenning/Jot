@@ -249,24 +249,20 @@
     #jot-ipad-home {
       display: none;
       position: fixed;
-      top: 1.2rem;
-      left: 8ch;
+      top: 0;
+      left: 0;
+      right: 0;
+      height: 48px;
       z-index: 200;
       background: none;
       border: none;
-      font-family: ui-monospace, 'SF Mono', monospace;
-      font-size: 1rem;
-      line-height: 1;
-      padding: 5px 8px;
-      color: inherit;
       -webkit-tap-highlight-color: transparent;
       touch-action: manipulation;
-      cursor: pointer;
+      cursor: default;
     }
-    #jot-ipad-home:active { opacity: 0.5; }
     /* iPad-specific overrides (class set by JS on page load) */
-    body.jot-ipad #jot-welcome { padding-top: 4rem; }
-    body.jot-ipad #jot-hint::before { content: "Press ⌘+R to go back"; }
+    body.jot-ipad #jot-welcome { padding-top: 48px; }
+    body.jot-ipad #jot-hint::before { content: "Press \2318+R or tap the top area to go back"; }
 
     @media (prefers-color-scheme: dark) {
       body {
@@ -318,7 +314,7 @@
       <button id="jtb-underline">U</button>
     </div>
   </div>
-  <button id="jot-ipad-home">←</button>
+  <button id="jot-ipad-home"></button>
 
   <!-- Default "Jot Features" document — stored as plain markup so it reads
        and edits like any other Jot document. jotSeedFeatures() reads
@@ -364,6 +360,8 @@
         (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1 &&
          !/iPhone/.test(navigator.userAgent))) {
       document.body.classList.add('jot-ipad');
+      const _iphb = document.getElementById('jot-ipad-home');
+      if (_iphb) _iphb.style.display = 'block';
     }
 
     // Tell the browser to use <div> (not <p> or <br>) when its native Enter
@@ -2172,22 +2170,13 @@
       const t = document.getElementById('jot-toolbar');
       if (t) { t.style.visibility = 'hidden'; t.style.top = ''; }
       editor.style.paddingTop = '';
-      // Hide button explicitly; MutationObserver will re-evaluate once
-      // the new #jot-welcome element is in the DOM.
-      const _hb = document.getElementById('jot-ipad-home');
-      if (_hb) _hb.style.display = 'none';
     }
 
-    // Show/hide the iPad ← button based on which screen is active.
-    // Overview (#jot-welcome with no data-screen): hidden.
-    // Document, recovery, reset, and other overlays: visible.
+    // Ensure the iPad full-width tap zone is visible whenever on iPad.
     function _jotIPadBtnUpdate() {
       if (!document.body.classList.contains('jot-ipad')) return;
-      const w = document.getElementById('jot-welcome');
       const btn = document.getElementById('jot-ipad-home');
-      if (!btn) return;
-      const show = !w || !!w.dataset.screen;
-      btn.style.display = show ? 'block' : 'none';
+      if (btn) btn.style.display = 'block';
     }
 
     function jotToolbarPin() {
@@ -2210,10 +2199,10 @@
       if (!t) return;
       jotToolbarPin();
       t.style.visibility = 'visible';
-      // On iPad: show the ← button and push editor below the topbar.
+      // On iPad: push editor below the 48px topbar tap zone.
       if (_isIPad) {
         _jotIPadBtnUpdate();
-        editor.style.paddingTop = '4rem';
+        editor.style.paddingTop = '48px';
         return;
       }
       // Push editor content below the pill so the first line isn't hidden.
