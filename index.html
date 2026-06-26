@@ -255,7 +255,7 @@
       background: none;
       border: none;
       font-family: ui-monospace, 'SF Mono', monospace;
-      font-size: 2.2rem;
+      font-size: 1rem;
       line-height: 1;
       padding: 5px 8px;
       color: inherit;
@@ -264,6 +264,9 @@
       cursor: pointer;
     }
     #jot-ipad-home:active { opacity: 0.5; }
+    /* iPad-specific overrides (class set by JS on page load) */
+    body.jot-ipad #jot-welcome { padding-top: 40px; }
+    body.jot-ipad #jot-hint::before { content: "Tap ⌂ or press ⌘+. to go back"; }
 
     @media (prefers-color-scheme: dark) {
       body {
@@ -356,6 +359,12 @@
   <script>
     const editor = document.getElementById('editor');
     const blockCursor = document.getElementById('block-cursor');
+
+    if (/iPad/.test(navigator.userAgent) ||
+        (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1 &&
+         !/iPhone/.test(navigator.userAgent))) {
+      document.body.classList.add('jot-ipad');
+    }
 
     // Tell the browser to use <div> (not <p> or <br>) when its native Enter
     // handling fires as a fallback. Affects Firefox most visibly but is a
