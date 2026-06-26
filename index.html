@@ -249,8 +249,8 @@
     #jot-ipad-home {
       display: none;
       position: fixed;
-      top: 0.4rem;
-      right: 0.6rem;
+      top: 1.2rem;
+      left: 8ch;
       z-index: 200;
       background: none;
       border: none;
@@ -265,8 +265,8 @@
     }
     #jot-ipad-home:active { opacity: 0.5; }
     /* iPad-specific overrides (class set by JS on page load) */
-    body.jot-ipad #jot-welcome { padding-top: 40px; }
-    body.jot-ipad #jot-hint::before { content: "Tap ⌂ or press ⌘+. to go back"; }
+    body.jot-ipad #jot-welcome { padding-top: 4rem; }
+    body.jot-ipad #jot-hint::before { content: "Press ⌘+R to go back"; }
 
     @media (prefers-color-scheme: dark) {
       body {
@@ -318,7 +318,7 @@
       <button id="jtb-underline">U</button>
     </div>
   </div>
-  <button id="jot-ipad-home">⌂</button>
+  <button id="jot-ipad-home">←</button>
 
   <!-- Default "Jot Features" document — stored as plain markup so it reads
        and edits like any other Jot document. jotSeedFeatures() reads
@@ -2172,8 +2172,22 @@
       const t = document.getElementById('jot-toolbar');
       if (t) { t.style.visibility = 'hidden'; t.style.top = ''; }
       editor.style.paddingTop = '';
+      // Hide button explicitly; MutationObserver will re-evaluate once
+      // the new #jot-welcome element is in the DOM.
       const _hb = document.getElementById('jot-ipad-home');
       if (_hb) _hb.style.display = 'none';
+    }
+
+    // Show/hide the iPad ← button based on which screen is active.
+    // Overview (#jot-welcome with no data-screen): hidden.
+    // Document, recovery, reset, and other overlays: visible.
+    function _jotIPadBtnUpdate() {
+      if (!document.body.classList.contains('jot-ipad')) return;
+      const w = document.getElementById('jot-welcome');
+      const btn = document.getElementById('jot-ipad-home');
+      if (!btn) return;
+      const show = !w || !!w.dataset.screen;
+      btn.style.display = show ? 'block' : 'none';
     }
 
     function jotToolbarPin() {
@@ -2188,9 +2202,7 @@
     }
 
     function jotToolbarShow() {
-      const _isIPad = /iPad/.test(navigator.userAgent) ||
-                      (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1 &&
-                       !/iPhone/.test(navigator.userAgent));
+      const _isIPad = document.body.classList.contains('jot-ipad');
       // Never run on desktop — prevents padding being applied to the editor there.
       if (!window.matchMedia('(pointer: coarse)').matches && !_isIPad) return;
       if (document.getElementById('jot-welcome')) return;
@@ -2198,15 +2210,10 @@
       if (!t) return;
       jotToolbarPin();
       t.style.visibility = 'visible';
-      // On iPad: show the ⌂ home button and add top padding for it.
+      // On iPad: show the ← button and push editor below the topbar.
       if (_isIPad) {
-        const _hb = document.getElementById('jot-ipad-home');
-        if (_hb) _hb.style.display = 'block';
-        requestAnimationFrame(() => {
-          const _hb2 = document.getElementById('jot-ipad-home');
-          const _hbH = _hb2 ? (_hb2.offsetHeight || 32) : 32;
-          editor.style.paddingTop = (_hbH + 8) + 'px';
-        });
+        _jotIPadBtnUpdate();
+        editor.style.paddingTop = '4rem';
         return;
       }
       // Push editor content below the pill so the first line isn't hidden.
@@ -2492,6 +2499,7 @@
         for (const m of mutations) {
           if ([...m.addedNodes, ...m.removedNodes].some(n => n.id === 'jot-welcome')) {
             _hintUpdate();
+            _jotIPadBtnUpdate();
             return;
           }
         }
