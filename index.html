@@ -929,59 +929,53 @@
       }
 
       if ((e.metaKey || e.ctrlKey) && e.key === 's') {
-        // Safari web-app (added to Dock): no browser chrome means Cmd+S never
-        // reaches the native "Save Page As" dialog. Intercept it here and
-        // trigger a programmatic download of the serialised document instead.
+        e.preventDefault();
+        // Safari PWA (added to Dock): delegate to the share sheet on iOS/iPadOS
+        // since the share sheet includes "Save to Files". On macOS standalone,
+        // fall through to programmatic save below.
         const _safariStandalone =
           /^((?!chrome|android).)*safari/i.test(navigator.userAgent) &&
           (navigator.standalone === true ||
            window.matchMedia('(display-mode: standalone)').matches);
         if (_safariStandalone) {
-          // Safari PWA has no browser chrome so the native Cmd+S dialog is
-          // unavailable. On iOS/iPadOS the share sheet is rich (includes
-          // "Save to Files"), so delegate to _jotMobileSave() there. On macOS
-          // the share sheet only offers AirDrop/Messages/Copy, so fall back to
-          // a direct download to the Downloads folder instead.
-          e.preventDefault();
           const _isiOS = /iPhone|iPad|iPod/.test(navigator.userAgent) ||
                          (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
           if (_isiOS) { _jotMobileSave(); return; }
-          const _first = jotFirstLine();
-          const _fname = (_first ? _first.replace(/\s+/g, '_') : 'jot') + '.html';
-          const _html  = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
-          const _blob  = new Blob([_html], { type: 'text/html' });
-          const _url   = URL.createObjectURL(_blob);
-          const _a     = document.createElement('a');
-          _a.href     = _url;
-          _a.download = _fname;
-          document.body.appendChild(_a);
-          _a.click();
-          document.body.removeChild(_a);
-          setTimeout(() => URL.revokeObjectURL(_url), 1000);
-          return;
+          // macOS standalone: fall through to programmatic save
         }
-        if (jotExported) {
-          // Exported file: set title to the HTML filename right now so the
-          // browser's "Save Page As" dialog sees it immediately. The title was
-          // also set at load time (for the tab label), but it must be re-set
-          // here because the dialog reads document.title at the instant the
-          // keydown fires — any earlier assignment can be overridden by the
-          // browser restoring its own title state between load and save.
-          const _r = window.location.href.split('/').pop().split('?')[0].split('#')[0];
-          const _n = decodeURIComponent(_r).replace(/\.html$/i, '').replace(/\s+/g, '_');
-          if (_n) document.title = _n;
-          // Saving the file resolves unsaved changes — clear the draft so
-          // the next open doesn't show the recovery dialog.
-          localStorage.removeItem(JOT_EXPORT_DRAFT_KEY);
-          // No reset: the exported file's tab should always show the filename.
+        // Always serialize the live DOM ourselves. Chrome's native "Save Page
+        // As" → "Webpage, HTML Only" saves the original HTTP response source,
+        // not the current DOM, so contenteditable edits are lost. We intercept
+        // and write document.documentElement.outerHTML which includes everything
+        // the user typed. The File System Access API lets us write back to the
+        // same file on subsequent saves without showing a dialog each time.
+        if (jotExported) localStorage.removeItem(JOT_EXPORT_DRAFT_KEY);
+        const _svFirst = jotFirstLine();
+        const _svName = jotExported
+          ? (decodeURIComponent(window.location.href.split('/').pop()
+               .split('?')[0].split('#')[0]).replace(/\.html$/i, '').replace(/\s+/g, '_') || 'jot')
+          : (_svFirst ? _svFirst.replace(/\s+/g, '_') : 'jot');
+        const _svFname = _svName + '.html';
+        const _svHtml  = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
+        const _svBlob  = new Blob([_svHtml], { type: 'text/html' });
+        if ('showSaveFilePicker' in window) {
+          // File System Access API: first save shows a picker; subsequent saves
+          // write silently to the same file handle.
+          const _write = h => h.createWritable()
+            .then(w => w.write(_svBlob).then(() => w.close()))
+            .catch(() => { _jotFileHandle = null; _jotBlobDownload(_svBlob, _svFname); });
+          if (_jotFileHandle) {
+            _write(_jotFileHandle).catch(() => {});
+          } else {
+            window.showSaveFilePicker({
+              suggestedName: _svFname,
+              types: [{ description: 'HTML file', accept: { 'text/html': ['.html'] } }]
+            }).then(h => { _jotFileHandle = h; return _write(h); })
+              .catch(err => { if (err.name !== 'AbortError') _jotBlobDownload(_svBlob, _svFname); });
+          }
         } else {
-          // Live app: temporarily rename the tab to the first line of text so
-          // the "Save Page As" dialog defaults to a meaningful filename,
-          // then restore 'Jot' after the dialog has had a chance to read it.
-          const first = jotFirstLine();
-          document.title = first ? first.replace(/\s+/g, '_') : 'jot';
-          clearTimeout(_titleResetTimer);
-          _titleResetTimer = setTimeout(() => { document.title = 'Jot'; }, 1000);
+          // Fallback for Safari and browsers without File System Access API.
+          _jotBlobDownload(_svBlob, _svFname);
         }
         return;
       }
@@ -1246,6 +1240,7 @@
 
     let jotCurrentId = null;
     let jotExported = false;
+    let _jotFileHandle = null; // File System Access API handle for in-place saves
     let jotFromRecovery = false; // true while a Recovery snapshot is open
 
     function jotFirstLine() {
@@ -1300,7 +1295,16 @@
       return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
     }
 
+    function _jotBlobDownload(blob, fname) {
+      const _u = URL.createObjectURL(blob);
+      const _a = document.createElement('a');
+      _a.href = _u; _a.download = fname;
+      document.body.appendChild(_a); _a.click(); document.body.removeChild(_a);
+      setTimeout(() => URL.revokeObjectURL(_u), 1000);
+    }
+
     function jotOpenEntry(entry) {
+      _jotFileHandle = null; // New document — don't overwrite the previous file
       jotBackup(entry);
       const w = document.getElementById('jot-welcome');
       if (w) w.remove();
@@ -1322,6 +1326,7 @@
     }
 
     function jotStartNew() {
+      _jotFileHandle = null; // New document — don't overwrite the previous file
       const w = document.getElementById('jot-welcome');
       if (w) w.remove();
       jotCurrentId = null;
