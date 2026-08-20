@@ -2240,7 +2240,17 @@
       );
 
       const _ipadHomeBtn = document.getElementById('jot-ipad-home');
-      if (_ipadHomeBtn) _ipadHomeBtn.addEventListener('click', () => doEscape());
+      if (_ipadHomeBtn) _ipadHomeBtn.addEventListener('pointerdown', (e) => {
+        // Only respond to genuine touch input. Mouse clicks on devices that
+        // falsely trigger iPad detection (maxTouchPoints > 1 on some Macs)
+        // must be ignored — otherwise a click near the top of the page
+        // silently calls doEscape() and dumps the user to the overview.
+        // e.preventDefault() also stops the button from stealing keyboard
+        // focus regardless of pointer type.
+        e.preventDefault();
+        if (e.pointerType !== 'touch') return;
+        doEscape();
+      });
 
       document.getElementById('jtb-undo').addEventListener('click', () => _doUndo());
       document.getElementById('jtb-redo').addEventListener('click', () => _doRedo());
