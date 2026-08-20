@@ -356,12 +356,17 @@
     const editor = document.getElementById('editor');
     const blockCursor = document.getElementById('block-cursor');
 
+    // Always reset saved state first — exported files may contain stale
+    // inline styles or body classes from the session that saved them.
+    document.body.classList.remove('jot-ipad');
+    const _iphbEl = document.getElementById('jot-ipad-home');
+    if (_iphbEl) _iphbEl.style.display = '';
+
     if (/iPad/.test(navigator.userAgent) ||
         (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1 &&
          !/iPhone/.test(navigator.userAgent))) {
       document.body.classList.add('jot-ipad');
-      const _iphb = document.getElementById('jot-ipad-home');
-      if (_iphb) _iphb.style.display = 'block';
+      if (_iphbEl) _iphbEl.style.display = 'block';
     }
 
     // Tell the browser to use <div> (not <p> or <br>) when its native Enter
@@ -2191,6 +2196,8 @@
     }
 
     function jotToolbarShow() {
+      // Exported files have no overview to return to — never show the topbar.
+      if (jotExported) return;
       const _isIPad = document.body.classList.contains('jot-ipad');
       // Never run on desktop — prevents padding being applied to the editor there.
       if (!window.matchMedia('(pointer: coarse)').matches && !_isIPad) return;
