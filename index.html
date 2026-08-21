@@ -984,13 +984,20 @@
 
           if ('showSaveFilePicker' in window) {
             // Always show the dialog — feels like the browser's own "Save Page As".
-            // After the first save, startIn places the picker in the same folder
-            // so the user only needs to press Enter/Return to confirm the overwrite.
+            // startIn tells the picker where to open:
+            //   • After first save: use the stored FileSystemHandle (exact folder).
+            //   • First save: parse path segments of the file:// URL and map to a
+            //     well-known directory so the picker opens at Desktop/Downloads/etc.
+            //     showSaveFilePicker only accepts well-known strings or FileSystemHandles,
+            //     not arbitrary paths — this mapping is the best we can do.
+            const _knownDirs = ['desktop','downloads','documents','music','pictures','videos'];
+            const _pathSegs  = window.location.pathname.split('/').map(s => s.toLowerCase());
+            const _wellKnown = _knownDirs.find(d => _pathSegs.includes(d));
             const _opts = {
               suggestedName: _svFname,
-              types: [{ description: 'HTML file', accept: { 'text/html': ['.html'] } }]
+              types: [{ description: 'HTML file', accept: { 'text/html': ['.html'] } }],
+              startIn: _jotFileHandle || _wellKnown || 'documents'
             };
-            if (_jotFileHandle) _opts.startIn = _jotFileHandle;
             window.showSaveFilePicker(_opts)
               .then(h => {
                 _jotFileHandle = h;
