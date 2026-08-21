@@ -1234,6 +1234,13 @@
         // Escape the <br> outside any link it landed in.
         const _seA = br.closest ? br.closest('a') : null;
         if (_seA) { _seA.after(br); }
+        // insertNode splits text nodes at the cursor, leaving an empty ""
+        // text node immediately after <br>. That node is invisible to the
+        // cursor but fools the nextSibling check into thinking there IS a
+        // following node. Strip any such empty text nodes now.
+        while (br.nextSibling && br.nextSibling.nodeType === Node.TEXT_NODE && !br.nextSibling.textContent) {
+          br.nextSibling.remove();
+        }
         // Guarantee a visible cursor position after the new <br>.
         if (!br.nextSibling) { br.after(document.createElement('br')); }
         const newRange = document.createRange();
@@ -2511,6 +2518,12 @@
         if (_jotEnterHandled) e.preventDefault();
         _jotEnterHandled = false; // reset for next keystroke
       } else if (e.inputType === 'insertLineBreak') {
+        // When our keydown handler already handled Shift+Enter (_jotEnterHandled),
+        // always prevent the browser's own <br> insertion so it doesn't race with
+        // the DOM we already built. Without this, Chrome fires beforeinput even
+        // after keydown.preventDefault() (non-spec) and inserts a second <br>,
+        // making the first Shift+Enter appear to do nothing on plain lines.
+        if (_jotEnterHandled) { e.preventDefault(); _jotEnterHandled = false; return; }
         const lineEl = getLineEl();
         if (lineEl && lineEl.classList.contains('list-line')) e.preventDefault();
       } else if (e.inputType === 'insertText' && (e.data === '-' || e.data === '>' || e.data === '+' || e.data === '#' || e.data === '*')) {
