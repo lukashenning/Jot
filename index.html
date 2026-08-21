@@ -1216,17 +1216,13 @@
         return;
       }
 
-      if (!isList) return;
-
-      if (e.key === 'Backspace' && isAtStart(lineEl)) {
-        e.preventDefault();
-        jotUndoSnap();
-        lineEl.classList.remove('list-line');
-        lineEl.style.removeProperty('--level');
-        return;
-      }
-
       if (e.key === 'Enter' && e.shiftKey) {
+        // Shift+Enter inserts a <br> line-break inside the current line/block,
+        // for both plain lines and list lines. A <br> that ends up as the last
+        // child of a contenteditable block is invisible to the cursor (there is
+        // nowhere for the caret to sit after it), so we always ensure a second
+        // sibling <br> follows the inserted one. That way the first press
+        // visibly opens a new line and the cursor lands on it immediately.
         _jotEnterHandled = true;
         e.preventDefault();
         jotUndoSnap();
@@ -1235,15 +1231,27 @@
         range.deleteContents();
         const br = document.createElement('br');
         range.insertNode(br);
-        // If the insertion landed inside a link, escape br outside it.
+        // Escape the <br> outside any link it landed in.
         const _seA = br.closest ? br.closest('a') : null;
         if (_seA) { _seA.after(br); }
+        // Guarantee a visible cursor position after the new <br>.
+        if (!br.nextSibling) { br.after(document.createElement('br')); }
         const newRange = document.createRange();
         newRange.setStartAfter(br);
         newRange.collapse(true);
         sel.removeAllRanges();
         sel.addRange(newRange);
         requestAnimationFrame(jotScrollToCursor);
+        return;
+      }
+
+      if (!isList) return;
+
+      if (e.key === 'Backspace' && isAtStart(lineEl)) {
+        e.preventDefault();
+        jotUndoSnap();
+        lineEl.classList.remove('list-line');
+        lineEl.style.removeProperty('--level');
         return;
       }
 
@@ -2269,6 +2277,25 @@
         }
         return text;
       }).join('\n'));
+    });
+
+    // ── Cut handler ───────────────────────────────────────────────────────────
+    // The browser's native cut serialises the selection using its own HTML
+    // format, losing Jot-specific markup (bold, links, list structure).
+    // We intercept the event, delegate to the copy handler (which already
+    // knows how to serialise everything correctly), then delete the selection.
+    editor.addEventListener('cut', (e) => {
+      const sel = window.getSelection();
+      if (!sel || !sel.rangeCount || sel.isCollapsed) return;
+      e.preventDefault();
+      // Fire execCommand('copy') so our copy handler above fills the clipboard
+      // with properly-formatted HTML/plain-text. The handler runs synchronously
+      // inside this user-gesture context, so clipboard access is allowed.
+      document.execCommand('copy');
+      // Snapshot for undo, then delete the selected content. execCommand('delete')
+      // fires the standard input event so all editor-normalisation hooks run.
+      jotUndoSnap();
+      document.execCommand('delete');
     });
 
     // ── Mobile toolbar ────────────────────────────────────────────────────────
