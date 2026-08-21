@@ -1627,23 +1627,39 @@
         const _svBlob  = new Blob([_svHtml], { type: 'text/html' });
         if ('showSaveFilePicker' in window) {
           // File System Access API: first save shows a picker; subsequent saves
-          // write silently to the same file handle.
+          // write silently to the same file handle (no dialog = no focus loss).
+          const _savedFlash = () => {
+            // Brief title change so the user knows the silent write completed.
+            const _pt = document.title;
+            document.title = '✓ ' + _pt;
+            setTimeout(() => { document.title = _pt; }, 1500);
+          };
           const _write = h => h.createWritable()
             .then(w2 => w2.write(_svBlob).then(() => w2.close()))
             .then(() => {
               // Clear the draft only after the write has fully completed, so the
               // recovery dialog still works correctly if the write fails.
               if (jotExported) localStorage.removeItem(JOT_EXPORT_DRAFT_KEY);
+              _savedFlash();
               editor.focus();
             })
-            .catch(() => { _jotFileHandle = null; _jotBlobDownload(_svBlob, _svFname); });
+            .catch(() => {
+              // Write failed (e.g. file moved/locked). Null the handle so the
+              // next Cmd+S re-shows the picker; fall back to blob download now.
+              _jotFileHandle = null;
+              _jotBlobDownload(_svBlob, _svFname);
+            });
           if (_jotFileHandle) {
-            _write(_jotFileHandle).catch(() => {});
+            _write(_jotFileHandle);
           } else {
-            window.showSaveFilePicker({
+            // Pass startIn: handle when available so the picker re-opens in the
+            // same folder as the last saved file instead of defaulting elsewhere.
+            const _pickerOpts = {
               suggestedName: _svFname,
               types: [{ description: 'HTML file', accept: { 'text/html': ['.html'] } }]
-            }).then(h => { _jotFileHandle = h; return _write(h); })
+            };
+            window.showSaveFilePicker(_pickerOpts)
+              .then(h => { _jotFileHandle = h; return _write(h); })
               .catch(err => { if (err.name !== 'AbortError') _jotBlobDownload(_svBlob, _svFname); });
           }
         } else {
