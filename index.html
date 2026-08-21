@@ -928,6 +928,102 @@
         return;
       }
 
+      if ((e.metaKey || e.ctrlKey) && e.key === 's') {
+        // Safari web-app (added to Dock): no browser chrome means Cmd+S never
+        // reaches the native "Save Page As" dialog. Intercept it here and
+        // trigger a programmatic download of the serialised document instead.
+        const _safariStandalone =
+          /^((?!chrome|android).)*safari/i.test(navigator.userAgent) &&
+          (navigator.standalone === true ||
+           window.matchMedia('(display-mode: standalone)').matches);
+        if (_safariStandalone) {
+          // Safari PWA has no browser chrome so the native Cmd+S dialog is
+          // unavailable. On iOS/iPadOS the share sheet is rich (includes
+          // "Save to Files"), so delegate to _jotMobileSave() there. On macOS
+          // the share sheet only offers AirDrop/Messages/Copy, so fall back to
+          // a direct download to the Downloads folder instead.
+          e.preventDefault();
+          const _isiOS = /iPhone|iPad|iPod/.test(navigator.userAgent) ||
+                         (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+          if (_isiOS) { _jotMobileSave(); return; }
+          const _first = jotFirstLine();
+          const _fname = (_first ? _first.replace(/\s+/g, '_') : 'jot') + '.html';
+          const _html  = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
+          const _blob  = new Blob([_html], { type: 'text/html' });
+          const _url   = URL.createObjectURL(_blob);
+          const _a     = document.createElement('a');
+          _a.href     = _url;
+          _a.download = _fname;
+          document.body.appendChild(_a);
+          _a.click();
+          document.body.removeChild(_a);
+          setTimeout(() => URL.revokeObjectURL(_url), 1000);
+          return;
+        }
+        if (jotExported) {
+          // Local file: Chrome's "Save Page As" reads the file from disk for
+          // file:// URLs — it does NOT serialize the live DOM — so edits are
+          // silently discarded. We intercept the save here and use the File
+          // System Access API instead, which writes the live DOM ourselves.
+          // A picker dialog always appears (no silent overwrite), and after the
+          // first save the picker opens in the same folder automatically.
+          e.preventDefault();
+          const _svR   = window.location.href.split('/').pop().split('?')[0].split('#')[0];
+          const _svN   = decodeURIComponent(_svR).replace(/\.html$/i, '').replace(/\s+/g, '_') || 'jot';
+          const _svFname = _svN + '.html';
+          const _svHtml  = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
+          const _svBlob  = new Blob([_svHtml], { type: 'text/html' });
+
+          const _blobFallback = () => {
+            const _u = URL.createObjectURL(_svBlob);
+            const _a = document.createElement('a');
+            _a.href = _u; _a.download = _svFname;
+            document.body.appendChild(_a); _a.click(); document.body.removeChild(_a);
+            setTimeout(() => URL.revokeObjectURL(_u), 1000);
+          };
+
+          if ('showSaveFilePicker' in window) {
+            // Always show the dialog — feels like the browser's own "Save Page As".
+            // After the first save, startIn places the picker in the same folder
+            // so the user only needs to press Enter/Return to confirm the overwrite.
+            const _opts = {
+              suggestedName: _svFname,
+              types: [{ description: 'HTML file', accept: { 'text/html': ['.html'] } }]
+            };
+            if (_jotFileHandle) _opts.startIn = _jotFileHandle;
+            window.showSaveFilePicker(_opts)
+              .then(h => {
+                _jotFileHandle = h;
+                return h.createWritable();
+              })
+              .then(ws => ws.write(_svBlob).then(() => ws.close()))
+              .then(() => {
+                // Clear draft only after the write fully succeeds so the
+                // recovery dialog still works if the write fails mid-way.
+                localStorage.removeItem(JOT_EXPORT_DRAFT_KEY);
+                editor.focus();
+              })
+              .catch(err => {
+                if (err.name !== 'AbortError') _blobFallback();
+              });
+          } else {
+            // Safari / browsers without File System Access API.
+            _blobFallback();
+            localStorage.removeItem(JOT_EXPORT_DRAFT_KEY);
+          }
+        } else {
+          // Live web app: let the browser handle "Save Page As" natively.
+          // Chrome serialises the live DOM (including the editor content) for
+          // HTTPS pages, so the standard dialog works correctly here.
+          // Temporarily rename the tab so the dialog proposes a useful filename.
+          const first = jotFirstLine();
+          document.title = first ? first.replace(/\s+/g, '_') : 'jot';
+          clearTimeout(_titleResetTimer);
+          _titleResetTimer = setTimeout(() => { document.title = 'Jot'; }, 1000);
+        }
+        return;
+      }
+
       if ((e.metaKey || e.ctrlKey) && e.key === 'b') {
         e.preventDefault();
         jotUndoSnap(); jotAllowFormat = true; document.execCommand('bold'); jotAllowFormat = false;
@@ -1188,7 +1284,7 @@
 
     let jotCurrentId = null;
     let jotExported = false;
-    let _jotFileHandle = null; // File System Access API handle for in-place saves
+    let _jotFileHandle = null; // File System Access API handle — remembers the last save location
     let jotFromRecovery = false; // true while a Recovery snapshot is open
 
     function jotFirstLine() {
@@ -1243,16 +1339,8 @@
       return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
     }
 
-    function _jotBlobDownload(blob, fname) {
-      const _u = URL.createObjectURL(blob);
-      const _a = document.createElement('a');
-      _a.href = _u; _a.download = fname;
-      document.body.appendChild(_a); _a.click(); document.body.removeChild(_a);
-      setTimeout(() => URL.revokeObjectURL(_u), 1000);
-    }
-
     function jotOpenEntry(entry) {
-      _jotFileHandle = null; // New document — don't overwrite the previous file
+      _jotFileHandle = null; // opening a different jot — forget the previous save location
       jotBackup(entry);
       const w = document.getElementById('jot-welcome');
       if (w) w.remove();
@@ -1274,7 +1362,7 @@
     }
 
     function jotStartNew() {
-      _jotFileHandle = null; // New document — don't overwrite the previous file
+      _jotFileHandle = null; // new jot — forget the previous save location
       const w = document.getElementById('jot-welcome');
       if (w) w.remove();
       jotCurrentId = null;
@@ -1593,84 +1681,6 @@
     // Welcome screen key handling
     document.addEventListener('keydown', e => {
       const w = document.getElementById('jot-welcome');
-      // Cmd+S: save current file. Handled at the document level so it fires even
-      // when the editor loses focus after the File System Access API save-picker
-      // dialog closes. Only active when the editor is showing (no welcome screen).
-      if ((e.metaKey || e.ctrlKey) && e.key === 's' && !w) {
-        e.preventDefault();
-        // Safari PWA (added to Dock): delegate to the share sheet on iOS/iPadOS
-        // since the share sheet includes "Save to Files". On macOS standalone,
-        // fall through to programmatic save below.
-        const _safariStandalone =
-          /^((?!chrome|android).)*safari/i.test(navigator.userAgent) &&
-          (navigator.standalone === true ||
-           window.matchMedia('(display-mode: standalone)').matches);
-        if (_safariStandalone) {
-          const _isiOS = /iPhone|iPad|iPod/.test(navigator.userAgent) ||
-                         (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
-          if (_isiOS) { _jotMobileSave(); return; }
-          // macOS standalone: fall through to programmatic save
-        }
-        // Always serialize the live DOM ourselves. Chrome's native "Save Page
-        // As" → "Webpage, HTML Only" saves the original HTTP response source,
-        // not the current DOM, so contenteditable edits are lost. We intercept
-        // and write document.documentElement.outerHTML which includes everything
-        // the user typed. The File System Access API lets us write back to the
-        // same file on subsequent saves without showing a dialog each time.
-        const _svFirst = jotFirstLine();
-        const _svName = jotExported
-          ? (decodeURIComponent(window.location.href.split('/').pop()
-               .split('?')[0].split('#')[0]).replace(/\.html$/i, '').replace(/\s+/g, '_') || 'jot')
-          : (_svFirst ? _svFirst.replace(/\s+/g, '_') : 'jot');
-        const _svFname = _svName + '.html';
-        const _svHtml  = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
-        const _svBlob  = new Blob([_svHtml], { type: 'text/html' });
-        if ('showSaveFilePicker' in window) {
-          // File System Access API: first save shows a picker; subsequent saves
-          // write silently to the same file handle (no dialog = no focus loss).
-          const _savedFlash = () => {
-            // Brief title change so the user knows the silent write completed.
-            const _pt = document.title;
-            document.title = '✓ ' + _pt;
-            setTimeout(() => { document.title = _pt; }, 1500);
-          };
-          const _write = h => h.createWritable()
-            .then(w2 => w2.write(_svBlob).then(() => w2.close()))
-            .then(() => {
-              // Clear the draft only after the write has fully completed, so the
-              // recovery dialog still works correctly if the write fails.
-              if (jotExported) localStorage.removeItem(JOT_EXPORT_DRAFT_KEY);
-              _savedFlash();
-              editor.focus();
-            })
-            .catch(() => {
-              // Write failed (e.g. file moved/locked). Null the handle so the
-              // next Cmd+S re-shows the picker; fall back to blob download now.
-              _jotFileHandle = null;
-              _jotBlobDownload(_svBlob, _svFname);
-            });
-          if (_jotFileHandle) {
-            _write(_jotFileHandle);
-          } else {
-            // Pass startIn: handle when available so the picker re-opens in the
-            // same folder as the last saved file instead of defaulting elsewhere.
-            const _pickerOpts = {
-              suggestedName: _svFname,
-              types: [{ description: 'HTML file', accept: { 'text/html': ['.html'] } }]
-            };
-            window.showSaveFilePicker(_pickerOpts)
-              .then(h => { _jotFileHandle = h; return _write(h); })
-              .catch(err => { if (err.name !== 'AbortError') _jotBlobDownload(_svBlob, _svFname); });
-          }
-        } else {
-          // Fallback for Safari and browsers without File System Access API.
-          _jotBlobDownload(_svBlob, _svFname);
-          // Blob download is synchronous from the user's perspective, so clear
-          // the draft immediately after dispatching it.
-          if (jotExported) localStorage.removeItem(JOT_EXPORT_DRAFT_KEY);
-        }
-        return;
-      }
       if (w) {
         const entryEls = Array.from(w.querySelectorAll('.jot-entry'));
         const selEl = w.querySelector('.jot-entry-selected');
