@@ -1022,14 +1022,36 @@
             localStorage.removeItem(JOT_EXPORT_DRAFT_KEY);
           }
         } else {
-          // Live web app: let the browser handle "Save Page As" natively.
-          // Chrome serialises the live DOM (including the editor content) for
-          // HTTPS pages, so the standard dialog works correctly here.
-          // Temporarily rename the tab so the dialog proposes a useful filename.
-          const first = jotFirstLine();
-          document.title = first ? first.replace(/\s+/g, '_') : 'jot';
-          clearTimeout(_titleResetTimer);
-          _titleResetTimer = setTimeout(() => { document.title = 'Jot'; }, 1000);
+          // Live web app: Chrome's "Webpage, HTML Only" saves the original HTTP
+          // response from the server, not the live DOM — so the saved file would
+          // have an empty editor and open as the overview instead of the jot.
+          // Intercept here and serialize the live DOM ourselves, same as above.
+          e.preventDefault();
+          const _svFirst = jotFirstLine();
+          const _svFname = (_svFirst ? _svFirst.replace(/\s+/g, '_') : 'jot') + '.html';
+          const _svHtml  = '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
+          const _svBlob  = new Blob([_svHtml], { type: 'text/html' });
+
+          const _blobFallback2 = () => {
+            const _u = URL.createObjectURL(_svBlob);
+            const _a = document.createElement('a');
+            _a.href = _u; _a.download = _svFname;
+            document.body.appendChild(_a); _a.click(); document.body.removeChild(_a);
+            setTimeout(() => URL.revokeObjectURL(_u), 1000);
+          };
+
+          if ('showSaveFilePicker' in window) {
+            window.showSaveFilePicker({
+              suggestedName: _svFname,
+              types: [{ description: 'HTML file', accept: { 'text/html': ['.html'] } }],
+              startIn: 'documents'
+            }).then(h => h.createWritable())
+              .then(ws => ws.write(_svBlob).then(() => ws.close()))
+              .then(() => { editor.focus(); })
+              .catch(err => { if (err.name !== 'AbortError') _blobFallback2(); });
+          } else {
+            _blobFallback2();
+          }
         }
         return;
       }
