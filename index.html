@@ -993,10 +993,15 @@
             const _knownDirs = ['desktop','downloads','documents','music','pictures','videos'];
             const _pathSegs  = window.location.pathname.split('/').map(s => s.toLowerCase());
             const _wellKnown = _knownDirs.find(d => _pathSegs.includes(d));
+            // startIn priority: cached handle from IndexedDB → well-known dir inferred
+            // from the file:// URL path → omit entirely and let the browser use its
+            // own last-used directory memory (which is 'documents' by default but can
+            // shift once the user has made a choice via the File System Access API).
+            const _startIn = _jotFileHandle || _wellKnown || undefined;
             const _opts = {
               suggestedName: _svFname,
               types: [{ description: 'HTML file', accept: { 'text/html': ['.html'] } }],
-              startIn: _jotFileHandle || _wellKnown || 'documents'
+              ...(_startIn !== undefined && { startIn: _startIn })
             };
             window.showSaveFilePicker(_opts)
               .then(h => {
