@@ -1008,6 +1008,9 @@
                 // Clear draft only after the write fully succeeds so the
                 // recovery dialog still works if the write fails mid-way.
                 localStorage.removeItem(JOT_EXPORT_DRAFT_KEY);
+                // Persist the handle so the next open of this file knows
+                // where to place the picker without the user navigating.
+                _jotSaveHandle(_jotFileHandle);
                 editor.focus();
               })
               .catch(err => {
@@ -1292,6 +1295,33 @@
     let jotCurrentId = null;
     let jotExported = false;
     let _jotFileHandle = null; // File System Access API handle — remembers the last save location
+
+    // Persist and restore FileSystemFileHandle across page loads so the save
+    // picker always opens in the file's own folder, not in Documents.
+    // FileSystemHandle objects are serialisable via the structured-clone
+    // algorithm and can be stored directly in IndexedDB.
+    const _jotHandlesDB = (() => {
+      let _db = null;
+      return () => _db ? Promise.resolve(_db) : new Promise((res, rej) => {
+        const r = indexedDB.open('jot-handles', 1);
+        r.onupgradeneeded = () => r.result.createObjectStore('h');
+        r.onsuccess = () => { _db = r.result; res(_db); };
+        r.onerror   = () => rej(r.error);
+      });
+    })();
+    function _jotSaveHandle(h) {
+      _jotHandlesDB().then(db => {
+        const tx = db.transaction('h', 'readwrite');
+        tx.objectStore('h').put(h, window.location.href);
+      }).catch(() => {});
+    }
+    function _jotLoadHandle() {
+      return _jotHandlesDB().then(db => new Promise(res => {
+        const r = db.transaction('h').objectStore('h').get(window.location.href);
+        r.onsuccess = () => res(r.result || null);
+        r.onerror   = () => res(null);
+      })).catch(() => null);
+    }
     let jotFromRecovery = false; // true while a Recovery snapshot is open
 
     function jotFirstLine() {
@@ -1675,6 +1705,9 @@
         const _raw = window.location.href.split('/').pop().split('?')[0].split('#')[0];
         const _fname = decodeURIComponent(_raw).replace(/\.html$/i, '').replace(/\s+/g, '_');
         if (_fname) document.title = _fname;
+        // Restore the FileSystemHandle from a previous save session so the
+        // picker opens in the file's own folder even on the very first Cmd+S.
+        _jotLoadHandle().then(h => { if (h) _jotFileHandle = h; });
         // If a draft exists the user made unsaved changes last session — offer
         // to continue from that draft or revert to the saved file content.
         const _draft = localStorage.getItem(JOT_EXPORT_DRAFT_KEY);
