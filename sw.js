@@ -1,6 +1,6 @@
 // Bump CACHE whenever you deploy a new version of index.html so that all
 // clients discard the old cached shell and fetch fresh resources.
-const CACHE = 'jot-v1';
+const CACHE = 'jot-v2';
 
 self.addEventListener('install', e => {
   // Pre-cache the app shell so the first offline load works immediately.
@@ -27,17 +27,19 @@ self.addEventListener('fetch', e => {
   // Sub-resources like the GitHub-hosted icon are left to the browser.
   if (e.request.mode !== 'navigate') return;
 
+  // Cache-first strategy: serve the cached shell immediately (no white
+  // screen on slow connections), then refresh the cache in the background.
+  // The user sees the newest version on their next page load.
   e.respondWith(
-    fetch(e.request)
-      .then(res => {
-        // Network succeeded — update the cache so the next offline visit
-        // gets the latest version of index.html.
-        caches.open(CACHE).then(c => c.put(e.request, res.clone()));
-        return res;
+    caches.open(CACHE).then(cache =>
+      cache.match('./index.html').then(cached => {
+        const networkFetch = fetch(e.request).then(res => {
+          cache.put(e.request, res.clone());
+          return res;
+        }).catch(() => cached); // network failed and we already have a cached copy — use it
+        // Serve cache immediately; if nothing cached yet, wait for network.
+        return cached || networkFetch;
       })
-      .catch(() =>
-        // Network failed — serve the cached shell.
-        caches.match('./index.html')
-      )
+    )
   );
 });

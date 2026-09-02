@@ -2134,9 +2134,16 @@
       jotTimer = setTimeout(jotSaveCurrent, 500);
     });
 
-    editor.addEventListener('copy', (e) => {
+    // ── Copy / Cut ────────────────────────────────────────────────────────────
+    // Shared serialisation logic used by both the copy and cut handlers.
+    // Accepts the clipboard event directly so it can write to e.clipboardData;
+    // both copy and cut events expose a writable clipboardData in their handler.
+    // (Triggering the copy handler from inside a cut handler via execCommand
+    // dispatches a synthetic event whose clipboardData writes are silently
+    // discarded by Chrome — hence the shared-function approach.)
+    function _jotWriteClipboard(e) {
       const sel = window.getSelection();
-      if (!sel || !sel.rangeCount || sel.isCollapsed) return;
+      if (!sel || !sel.rangeCount || sel.isCollapsed) return false;
       e.preventDefault();
 
       const range = sel.getRangeAt(0);
@@ -2284,23 +2291,15 @@
         }
         return text;
       }).join('\n'));
-    });
+      return true;
+    }
 
-    // ── Cut handler ───────────────────────────────────────────────────────────
-    // The browser's native cut serialises the selection using its own HTML
-    // format, losing Jot-specific markup (bold, links, list structure).
-    // We intercept the event, delegate to the copy handler (which already
-    // knows how to serialise everything correctly), then delete the selection.
+    editor.addEventListener('copy', _jotWriteClipboard);
+
     editor.addEventListener('cut', (e) => {
-      const sel = window.getSelection();
-      if (!sel || !sel.rangeCount || sel.isCollapsed) return;
-      e.preventDefault();
-      // Fire execCommand('copy') so our copy handler above fills the clipboard
-      // with properly-formatted HTML/plain-text. The handler runs synchronously
-      // inside this user-gesture context, so clipboard access is allowed.
-      document.execCommand('copy');
-      // Snapshot for undo, then delete the selected content. execCommand('delete')
-      // fires the standard input event so all editor-normalisation hooks run.
+      // Use the shared serialiser so the clipboard gets the same
+      // formatting as a plain copy. Then delete the selected content.
+      if (!_jotWriteClipboard(e)) return;
       jotUndoSnap();
       document.execCommand('delete');
     });
